@@ -103,8 +103,8 @@ ${rows.length ? '' : html`<tr><td colspan="5" class="muted">${empty}</td></tr>`}
 
   router.get('/reports/:id/file', (ctx) => {
     const r = reports.report(db, ctx.params.id);
-    if (!reports.canOpen(ctx.user, r)) throw new UserError('File not found.');
-    const s = db.get('SELECT sample_id FROM samples WHERE id = ?', r.sample_pk);
+    const s = db.get('SELECT * FROM samples WHERE id = ?', r.sample_pk);
+    if (!reports.canOpen(ctx.user, r, s)) throw new UserError('File not found.');
     const name = `${s.sample_id}-${r.kind === 'source' ? 'source' : 'report'}-v${r.version}.pdf`;
     h.raw(ctx, 'application/pdf', storage.get(r.file_key), { 'Content-Disposition': `inline; filename="${name}"`, 'X-Content-Type-Options': 'nosniff' });
   });

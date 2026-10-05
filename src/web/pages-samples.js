@@ -19,9 +19,7 @@ module.exports = function (router, { db }, h) {
   router.get('/', (ctx) => {
     const u = ctx.user;
     if (u.role === 'partner') return h.redirect(ctx, '/samples');
-    if (u.role === 'counsellor') {
-      return h.send(ctx, 'Dashboard', html`<h1>Welcome, ${u.name}</h1><div class="card">The counselling module is built after sample tracking and report white-labelling. Your cases will appear here.</div>`);
-    }
+    if (u.role === 'counsellor') return h.redirect(ctx, '/counselling');
     const counts = db.all('SELECT status, COUNT(*) c FROM samples GROUP BY status');
     const today = db.get("SELECT COUNT(*) c FROM samples WHERE substr(registered_at, 1, 10) >= ?", new Date(Date.now() - 86400000).toISOString().slice(0, 10)).c;
     const pendingOutbox = db.get("SELECT COUNT(*) c FROM notifications WHERE status = 'pending'").c;
@@ -59,16 +57,16 @@ ${low.map((a) => html`<tr><td><a href="/billing/ledger/${a.id}">${a.name}</a></t
     const accounts = isStaff(u) ? db.all('SELECT id, name FROM accounts ORDER BY type, name') : [];
     const used = Object.keys(samples.STATUSES).filter((k) => db.get(`SELECT 1 FROM samples s WHERE s.status = ? AND ${sc.sql} LIMIT 1`, k, ...sc.params));
     h.send(ctx, 'Samples', html`<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
-<div><h1>${u.role === 'partner' ? 'Your samples' : 'Samples'}</h1><p class="sub">${rows.length} shown${rows.length === 200 ? ' (latest 200)' : ''}</p></div>
-<a class="btn" href="/samples/new">Register a new sample</a></div>
+<div><h1>${u.role === 'partner' ? 'Your samples' : u.role === 'counsellor' ? 'Clients' : 'Samples'}</h1><p class="sub">${rows.length} shown${rows.length === 200 ? ' (latest 200)' : ''}</p></div>
+${samples.canRegister(u) ? html`<a class="btn" href="/samples/new">Register a new sample</a>` : ''}</div>
 <form class="filters" method="get"><input name="q" value="${q}" placeholder="Sample ID, name, mobile or reference">
 <select name="status"><option value="">All statuses</option>${used.map((k) => html`<option value="${k}" ${ctx.query.status === k ? raw('selected') : ''}>${samples.STATUSES[k]}</option>`)}</select>
 ${isStaff(u) ? html`<select name="account"><option value="">All accounts</option>${accounts.map((a) => html`<option value="${a.id}" ${String(a.id) === ctx.query.account ? raw('selected') : ''}>${a.name}</option>`)}</select>` : ''}
 <button class="light">Filter</button></form>
-<div class="table-wrap"><table><tr><th>Sample ID</th><th>Patient</th><th>Test</th>${isStaff(u) ? html`<th>Registered by</th>` : ''}<th>Status</th><th>Registered</th><th class="num">Billed</th></tr>
+<div class="table-wrap"><table><tr><th>Sample ID</th><th>Patient</th><th>Test</th>${isStaff(u) ? html`<th>Registered by</th>` : ''}<th>Status</th><th>Registered</th>${u.role === 'counsellor' ? '' : html`<th class="num">Billed</th>`}</tr>
 ${rows.map((r) => html`<tr><td><a class="mono" href="/samples/${r.sample_id}">${r.sample_id}</a></td><td>${r.full_name}<br><span class="muted">${r.mobile}</span></td><td>${r.test_name}</td>
 ${isStaff(u) ? html`<td>${r.account_name}</td>` : ''}<td>${statusPill(r.status, samples.STATUSES[r.status])}</td><td>${fmtDateTime(r.registered_at)}</td>
-<td class="num">${r.net_paise == null ? '' : rupees(r.net_paise)}${r.bill_status === 'reversed' ? html`<br><span class="pill">reversed</span>` : ''}</td></tr>`)}
+${u.role === 'counsellor' ? '' : html`<td class="num">${r.net_paise == null ? '' : rupees(r.net_paise)}${r.bill_status === 'reversed' ? html`<br><span class="pill">reversed</span>` : ''}</td>`}</tr>`)}
 ${rows.length ? '' : html`<tr><td colspan="7" class="muted">No samples yet.</td></tr>`}</table></div>`);
   });
 
@@ -166,11 +164,11 @@ ${duplicate ? html`<div class="card">${field('Reason for registering again', 'du
     const events = db.all('SELECT e.*, u.name AS user_name FROM sample_events e LEFT JOIN users u ON u.id = e.user_id WHERE sample_pk = ? ORDER BY e.id', s.id);
     const regBy = db.get('SELECT name FROM users WHERE id = ?', s.registered_by);
     const early = samples.BEFORE_LAB.includes(s.status);
-    const canCancel = s.status !== 'CANCELLED' && (early ? u.role !== 'counsellor' : u.role === 'admin');
+    const canCancel = !['CANCELLED', 'CLOSED', 'DELIVERED'].includes(s.status) && (early ? u.role !== 'counsellor' : u.role === 'admin');
     h.send(ctx, s.sample_id, html`<p class="noprint"><a href="/samples">← Samples</a></p>
 <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
 <div><h1 class="mono">${s.sample_id}</h1><p class="sub">${t.name} · ${statusPill(s.status, samples.STATUSES[s.status])}</p></div>
-<div class="actions" style="margin:0"><a class="btn" href="/samples/${s.sample_id}/label" target="_blank">Print label</a><a class="btn light" href="/samples/${s.sample_id}/bill" target="_blank">Print bill</a>
+<div class="actions" style="margin:0"><a class="btn" href="/samples/${s.sample_id}/label" target="_blank">Print label</a>${u.role === 'counsellor' ? '' : html`<a class="btn light" href="/samples/${s.sample_id}/bill" target="_blank">Print bill</a>`}
 ${samples.canEditPatient(u, s) && s.status !== 'CANCELLED' ? html`<a class="btn light" href="/samples/${s.sample_id}/edit">Edit patient</a>` : ''}</div></div>
 <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(320px,1fr));align-items:start">
 <div class="card"><h2 style="margin-top:0">Patient</h2><dl class="facts">
@@ -188,16 +186,17 @@ ${s.duplicate_reason ? html`<dt>Repeat reason</dt><dd>${s.duplicate_reason}</dd>
 ${s.status === 'REGISTERED' && u.role !== 'counsellor' ? html`<form method="post" action="/samples/${s.sample_id}/collect" class="noprint" style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px">
 <b>Mark as collected</b><div class="grid" style="margin-top:8px">${field('Collected by', 'collector', '', { required: true })}${field('Date and time', 'collected_at', '', { type: 'datetime-local', required: true })}</div>
 <div class="actions"><button>Mark collected</button></div></form>` : ''}</div>
-<div class="card"><h2 style="margin-top:0">Billing</h2>${bill ? html`<dl class="facts">
+${u.role === 'counsellor' ? '' : html`<div class="card"><h2 style="margin-top:0">Billing</h2>${bill ? html`<dl class="facts">
 <dt>Bill number</dt><dd class="mono">${bill.bill_no}</dd>
 <dt>${billing.PRICE_LIST_LABEL[bill.price_list]}</dt><dd>${rupees(bill.list_price_paise)}</dd>
 ${bill.discount_paise ? html`<dt>Discount</dt><dd>${rupees(bill.discount_paise)}</dd>` : ''}
 <dt>${bill.payer === 'credit' ? 'Deducted from credit' : bill.payer === 'supplier' ? 'Charged to supplier' : 'Patient pays'}</dt><dd><b>${rupees(bill.net_paise)}</b> · ${bill.status}</dd>
 ${bill.payment_mode ? html`<dt>Paid by</dt><dd>${bill.payment_mode}${bill.payment_ref ? ` (${bill.payment_ref})` : ''}</dd>` : ''}
 ${sbill ? html`<dt>Patient bill</dt><dd>${sbill.bill_no}: ${rupees(sbill.patient_price_paise)} − ${rupees(sbill.discount_paise)} + GST ${rupees(sbill.gst_paise)} = <b>${rupees(sbill.total_paise)}</b></dd>` : ''}
-</dl>` : html`<p class="muted">No bill.</p>`}</div>
+</dl>` : html`<p class="muted">No bill.</p>`}</div>`}
 ${isStaff(u) ? trackingCard(s, t) : ''}
 ${isStaff(u) ? h.reportCard(u, s, t) : ''}
+${h.counsellingCard(u, s, t)}
 <div class="card"><h2 style="margin-top:0">Timeline</h2><ul class="timeline">${events.map((e) => html`<li><b>${samples.STATUSES[e.to_status]}</b><br><span class="muted">${fmtDateTime(e.at)}${e.user_name ? ` · ${e.user_name}` : ''}</span>${e.note ? html`<br>${e.note}` : ''}</li>`)}</ul></div>
 </div>
 ${canCancel ? html`<details class="card noprint"><summary><b>Cancel this sample</b></summary>
@@ -216,7 +215,8 @@ ${canCancel ? html`<details class="card noprint"><summary><b>Cancel this sample<
     return html`<div class="card"><h2 style="margin-top:0">Tracking</h2><dl class="facts">
 ${ship.map((x) => html`<dt>${x.leg === 1 ? 'Pickup' : 'Onward dispatch'}</dt><dd><a class="mono" href="/tracking/shipments/${x.id}">${x.shipment_no}</a> · ${x.status.replace('_', ' ')}</dd>`)}
 ${s.received_at ? html`<dt>Lab receipt</dt><dd>${fmtDateTime(s.received_at)} · ${s.receipt_condition}</dd>` : ''}
-${s.tat_due_at ? html`<dt>TAT due</dt><dd>${fmtDate(s.tat_due_at)} · <span class="pill ${tat.paused ? '' : { green: 'good', amber: 'warn', red: 'bad' }[tat.level]}">${tat.paused ? 'paused' : tat.level === 'red' ? 'overdue' : `${tat.daysLeft.toFixed(1)} days left`}</span></dd>` : ''}
+${s.tat_due_at && s.released_at ? html`<dt>TAT due</dt><dd>${fmtDate(s.tat_due_at)} · <span class="pill ${s.tat_met ? 'good' : 'bad'}">${s.tat_met ? 'report released within TAT' : 'report released late'}</span></dd>` : ''}
+${s.tat_due_at && !s.released_at ? html`<dt>TAT due</dt><dd>${fmtDate(s.tat_due_at)} · <span class="pill ${tat.paused ? '' : { green: 'good', amber: 'warn', red: 'bad' }[tat.level]}">${tat.paused ? 'paused' : tat.level === 'red' ? 'overdue' : `${tat.daysLeft.toFixed(1)} days left`}</span></dd>` : ''}
 ${s.partner_received_at ? html`<dt>Partner lab receipt</dt><dd>${fmtDate(s.partner_received_at)}${s.partner_lab_ref ? ` · ref ${s.partner_lab_ref}` : ''}</dd>` : ''}
 ${s.reject_reason ? html`<dt>Rejected</dt><dd>${s.reject_reason}</dd>` : ''}
 ${s.hold_reason ? html`<dt>On hold</dt><dd>${s.hold_reason} (since ${fmtDateTime(s.hold_started_at)})</dd>` : ''}
@@ -287,6 +287,7 @@ ${Array.from({ length: copies }, () => label)}<script>setTimeout(()=>print(),300
 
   // ---------- Bill ----------
   router.get('/samples/:id/bill', (ctx) => {
+    if (ctx.user.role === 'counsellor') throw new UserError('Bills are not available to counsellors.');
     const { s, p, t, a, bill, sbill } = loadFull(ctx);
     if (!bill) throw new UserError('This sample has no bill.');
     let head;

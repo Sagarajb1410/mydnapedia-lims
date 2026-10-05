@@ -10,7 +10,7 @@ const samples = require('./samples');
 const form = require('./counselling-form');
 
 const MODES = ['Video call', 'Phone call', 'In person'];
-const STAGES = ['REPORT_RELEASED', 'COUNSELLING_SCHEDULED', 'COUNSELLING_DONE', 'ACTION_PLAN_DRAFTED', 'ACTION_PLAN_APPROVED', 'DELIVERED', 'CLOSED'];
+const STAGES = reports.COUNSELLING_STAGES;
 const FORM_OPEN = ['COUNSELLING_SCHEDULED', 'COUNSELLING_DONE', 'ACTION_PLAN_DRAFTED'];
 const PLAN_TYPES = { 'application/pdf': 'pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx' };
 
@@ -145,7 +145,9 @@ function caseFile(db, user, sampleId) {
   const t = db.get('SELECT * FROM tests WHERE id = ?', s.test_id);
   const f = loadForm(db, s.id);
   audit(db, user.id, 'case_file_downloaded', 'sample', s.sample_id);
-  return form.toCaseFile({ sample: s, patient: p, test: t, form: f ? f.data : {}, reportDate: s.released_at });
+  const session = db.get("SELECT * FROM counselling_sessions WHERE sample_pk = ? AND status IN ('scheduled','done') ORDER BY id DESC LIMIT 1", s.id);
+  const c = s.counsellor_id ? db.get('SELECT name FROM users WHERE id = ?', s.counsellor_id) : null;
+  return form.toCaseFile({ sample: s, patient: p, test: t, form: f ? f.data : {}, reportDate: s.released_at, session, counsellorName: c ? c.name : '' });
 }
 
 // ---------- Action plan ----------

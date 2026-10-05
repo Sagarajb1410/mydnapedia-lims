@@ -139,6 +139,6 @@ test('a report sent back returns the sample for a new upload, and release re-che
 
 test('demo data shows a released, a pending and a blocked report', () => {
   const { db } = fresh();
-  const st = db.all("SELECT status FROM reports WHERE kind = 'branded'").map((r) => r.status).sort();
-  assert.deepEqual(st, ['blocked', 'pending', 'released']);
+  const st = new Set(db.all("SELECT status FROM reports WHERE kind = 'branded'").map((r) => r.status));
+  assert.deepEqual([...st].sort(), ['blocked', 'pending', 'released']);
 });

@@ -16,6 +16,7 @@ const SOURCE_FROM = {
   partner_lab: ['RECEIVED_AT_PARTNER', 'PARTNER_REPORT_RECEIVED'],
   in_house: ['IN_HOUSE_PROCESSING', 'RESULT_READY'],
 };
+const COUNSELLING_STAGES = ['REPORT_RELEASED', 'COUNSELLING_SCHEDULED', 'COUNSELLING_DONE', 'ACTION_PLAN_DRAFTED', 'ACTION_PLAN_APPROVED', 'DELIVERED', 'CLOSED'];
 const SOURCE_TO = { partner_lab: 'PARTNER_REPORT_RECEIVED', in_house: 'RESULT_READY' };
 const BRANDED_FROM = ['PARTNER_REPORT_RECEIVED', 'RESULT_READY', 'REPORT_WHITE_LABELLED'];
 const MAX_BYTES = 40 * 1024 * 1024;
@@ -254,9 +255,12 @@ function forSample(db, samplePk) {
 }
 
 // Who may open a stored report file.
-function canOpen(user, r) {
+function canOpen(user, r, s) {
   if (['admin', 'lab'].includes(user.role)) return true;
-  return user.role === 'counsellor' && r.kind === 'branded' && r.status === 'released';
+  if (user.role !== 'counsellor') return false;
+  if (r.kind === 'branded') return r.status === 'released';
+  // The partner's original PDF is needed in Report Studio to draft the action plan.
+  return !!s && COUNSELLING_STAGES.includes(s.status) && (!s.counsellor_id || s.counsellor_id === user.id);
 }
 
 function queues(db) {
@@ -273,5 +277,5 @@ function queues(db) {
 }
 
 module.exports = {
-  SOURCE_FROM, BRANDED_FROM, leakTerms, readDocument, checkReport, uploadSource, uploadBranded, review, release, report, forSample, canOpen, queues,
+  SOURCE_FROM, BRANDED_FROM, COUNSELLING_STAGES, leakTerms, readDocument, checkReport, uploadSource, uploadBranded, review, release, report, forSample, canOpen, queues,
 };
