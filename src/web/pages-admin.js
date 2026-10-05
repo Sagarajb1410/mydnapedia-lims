@@ -15,6 +15,7 @@ const SETTING_LABELS = {
   companyAddress: 'Company address',
   courierName: 'Main courier vendor',
   courierWhatsapp: 'Courier vendor WhatsApp number',
+  partnerLabAddress: 'Partner lab address (for onward dispatch; shown only to the courier)',
 };
 
 module.exports = function (router, { db }, h) {

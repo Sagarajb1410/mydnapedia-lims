@@ -52,7 +52,11 @@ function readBody(req) {
 
 function parseUrlEncoded(buf) {
   const out = {};
-  for (const [k, v] of new URLSearchParams(buf.toString('utf8'))) out[k] = v;
+  // Fields named "x[]" (ticked checkboxes) arrive as arrays.
+  for (const [k, v] of new URLSearchParams(buf.toString('utf8'))) {
+    if (k.endsWith('[]')) (out[k.slice(0, -2)] ||= []).push(v);
+    else out[k] = v;
+  }
   return out;
 }
 

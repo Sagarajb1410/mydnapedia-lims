@@ -80,6 +80,7 @@ ${field('New password again', 'confirm', '', { type: 'password', required: true 
   }
 
   require('./pages-samples')(router, ctxBase, helpers);
+  require('./pages-tracking')(router, ctxBase, helpers);
   require('./pages-billing')(router, ctxBase, helpers);
   require('./pages-admin')(router, ctxBase, helpers);
 

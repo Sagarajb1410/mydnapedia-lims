@@ -204,6 +204,43 @@ const MIGRATIONS = [
   CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
   CREATE TABLE counters (name TEXT PRIMARY KEY, value INTEGER NOT NULL);
   `,
+  // 2: sample tracking (courier legs, lab receipt, TAT, holds, recollection)
+  `
+  ALTER TABLE samples ADD COLUMN tat_due_at TEXT;
+  ALTER TABLE samples ADD COLUMN receipt_condition TEXT;
+  ALTER TABLE samples ADD COLUMN reject_reason TEXT;
+  ALTER TABLE samples ADD COLUMN recollection_of INTEGER REFERENCES samples(id);
+  ALTER TABLE samples ADD COLUMN partner_lab_ref TEXT;
+  ALTER TABLE samples ADD COLUMN partner_received_at TEXT;
+  ALTER TABLE samples ADD COLUMN hold_from_status TEXT;
+  ALTER TABLE samples ADD COLUMN hold_reason TEXT;
+  ALTER TABLE samples ADD COLUMN hold_started_at TEXT;
+  ALTER TABLE samples ADD COLUMN tat_warned TEXT;
+  CREATE TABLE shipments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    shipment_no TEXT NOT NULL UNIQUE,
+    leg INTEGER NOT NULL CHECK (leg IN (1, 2)),
+    account_id INTEGER REFERENCES accounts(id),
+    origin TEXT NOT NULL,
+    destination TEXT NOT NULL,
+    courier TEXT NOT NULL,
+    awb TEXT,
+    pickup_date TEXT NOT NULL,
+    pickup_window TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('scheduled','picked_up','delivered','cancelled')),
+    created_by INTEGER REFERENCES users(id),
+    created_at TEXT NOT NULL,
+    picked_up_at TEXT,
+    delivered_at TEXT
+  );
+  CREATE TABLE shipment_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    shipment_id INTEGER NOT NULL REFERENCES shipments(id),
+    sample_pk INTEGER NOT NULL REFERENCES samples(id),
+    UNIQUE (shipment_id, sample_pk)
+  );
+  CREATE INDEX shipment_items_sample ON shipment_items(sample_pk);
+  `,
 ];
 
 // Audit rows must never change: block UPDATE and DELETE at database level.
