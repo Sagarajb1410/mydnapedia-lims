@@ -59,8 +59,8 @@ dl.facts{display:grid;grid-template-columns:180px 1fr;gap:6px 12px;margin:0}dl.f
 `;
 
 const NAV = {
-  admin: [['/', 'Dashboard'], ['/samples', 'Samples'], ['/samples/new', 'Register'], ['/billing', 'Billing'], ['/outbox', 'Outbox'], ['/admin', 'Admin'], ['/audit', 'Audit']],
-  lab: [['/', 'Dashboard'], ['/samples', 'Samples'], ['/samples/new', 'Register'], ['/outbox', 'Outbox']],
+  admin: [['/', 'Dashboard'], ['/samples', 'Samples'], ['/samples/new', 'Register'], ['/tracking', 'Tracking'], ['/billing', 'Billing'], ['/outbox', 'Outbox'], ['/admin', 'Admin'], ['/audit', 'Audit']],
+  lab: [['/', 'Dashboard'], ['/samples', 'Samples'], ['/samples/new', 'Register'], ['/tracking', 'Tracking'], ['/outbox', 'Outbox']],
   partner: [['/samples', 'Registration'], ['/samples/new', 'New sample'], ['/billing', 'Billing']],
   counsellor: [['/', 'Dashboard']],
 };
@@ -84,7 +84,7 @@ ${user ? html`<nav>${nav.map(([h, l]) => html`<a href="${h}" class="${active(h) 
 <main>${flash ? html`<div class="flash ${flash.type}">${flash.text}</div>` : ''}${body}</main></body></html>`;
 }
 
-const STATUS_TONE = { CANCELLED: 'bad', REJECTED: 'bad', ON_HOLD: 'warn', RECOLLECTION_REQUESTED: 'warn', DELIVERED: 'good', CLOSED: 'good', COLLECTED: '', REGISTERED: '' };
+const STATUS_TONE = { CANCELLED: 'bad', REJECTED: 'bad', RECEIVED_AT_LAB: 'good', ON_HOLD: 'warn', RECOLLECTION_REQUESTED: 'warn', DELIVERED: 'good', CLOSED: 'good', COLLECTED: '', REGISTERED: '' };
 
 function statusPill(code, label) {
   return html`<span class="pill ${STATUS_TONE[code] || ''}">${label}</span>`;

@@ -67,6 +67,7 @@ const SETTING_DEFAULTS = {
   companyAddress: '',
   courierName: 'Main courier vendor',
   courierWhatsapp: '',
+  partnerLabAddress: '',
 };
 
 function getSetting(db, key) {

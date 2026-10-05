@@ -13,6 +13,7 @@ const dbm = require('./db');
 const seed = require('./seed');
 const storage = require('./storage');
 const billing = require('./billing');
+const tracking = require('./tracking');
 const { createApp } = require('./web/app');
 
 const db = dbm.open(path.join(config.dataDir, 'lims.sqlite'));
@@ -41,6 +42,7 @@ if (process.argv.includes('--demo')) {
 // gets at most one reminder per day.
 const runReminders = () => {
   try { billing.lowBalanceReminders(db); } catch (e) { console.error('Reminder check failed:', e); }
+  try { tracking.tatAlerts(db); } catch (e) { console.error('TAT check failed:', e); }
 };
 runReminders();
 setInterval(runReminders, 3600 * 1000).unref();

@@ -9,6 +9,12 @@ const CODES = {
   N3: 'Low balance reminder',
   N4: 'Recharge request received',
   N5: 'Recharge approved',
+  N6: 'Courier pickup booked',
+  N7: 'Courier vendor pickup request',
+  N8: 'Sample received at lab',
+  N9: 'Sample rejected, fresh sample needed',
+  N10: 'Onward dispatch booked',
+  N11: 'TAT warning',
   N16: 'Cancellation and credit reversal',
 };
 

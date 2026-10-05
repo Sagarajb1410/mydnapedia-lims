@@ -3,6 +3,7 @@ const { html, raw, field, select, statusPill } = require('./views');
 const samples = require('../samples');
 const billing = require('../billing');
 const barcode = require('../barcode');
+const tracking = require('../tracking');
 const { fmtDateTime, fmtDate, rupees, toPaise, UserError, getSetting, istDate } = require('../util');
 
 const PAY_MODES = ['Cash', 'UPI', 'Card', 'Bank transfer', ['pending', 'Payment pending']];
@@ -195,6 +196,7 @@ ${bill.discount_paise ? html`<dt>Discount</dt><dd>${rupees(bill.discount_paise)}
 ${bill.payment_mode ? html`<dt>Paid by</dt><dd>${bill.payment_mode}${bill.payment_ref ? ` (${bill.payment_ref})` : ''}</dd>` : ''}
 ${sbill ? html`<dt>Patient bill</dt><dd>${sbill.bill_no}: ${rupees(sbill.patient_price_paise)} − ${rupees(sbill.discount_paise)} + GST ${rupees(sbill.gst_paise)} = <b>${rupees(sbill.total_paise)}</b></dd>` : ''}
 </dl>` : html`<p class="muted">No bill.</p>`}</div>
+${isStaff(u) ? trackingCard(s, t) : ''}
 <div class="card"><h2 style="margin-top:0">Timeline</h2><ul class="timeline">${events.map((e) => html`<li><b>${samples.STATUSES[e.to_status]}</b><br><span class="muted">${fmtDateTime(e.at)}${e.user_name ? ` · ${e.user_name}` : ''}</span>${e.note ? html`<br>${e.note}` : ''}</li>`)}</ul></div>
 </div>
 ${canCancel ? html`<details class="card noprint"><summary><b>Cancel this sample</b></summary>
@@ -202,6 +204,35 @@ ${canCancel ? html`<details class="card noprint"><summary><b>Cancel this sample<
 <div class="grid">${field('Reason', 'reason', '', { required: true })}${early ? '' : field('Amount to give back (₹)', 'refund', bill ? (bill.net_paise / 100).toFixed(2) : '0')}</div>
 <div class="actions"><button class="danger">Cancel sample</button></div></form></details>` : ''}`);
   });
+
+  // Tracking facts and the next lab action for staff.
+  function trackingCard(s, t) {
+    const tat = tracking.tatState(s);
+    const ship = db.all(`SELECT sh.id, sh.shipment_no, sh.leg, sh.status FROM shipment_items i JOIN shipments sh ON sh.id = i.shipment_id WHERE i.sample_pk = ? ORDER BY sh.id`, s.id);
+    const recollection = db.get('SELECT sample_id FROM samples WHERE recollection_of = ?', s.id);
+    const original = s.recollection_of ? db.get('SELECT sample_id FROM samples WHERE id = ?', s.recollection_of) : null;
+    const today = istDate();
+    return html`<div class="card"><h2 style="margin-top:0">Tracking</h2><dl class="facts">
+${ship.map((x) => html`<dt>${x.leg === 1 ? 'Pickup' : 'Onward dispatch'}</dt><dd><a class="mono" href="/tracking/shipments/${x.id}">${x.shipment_no}</a> · ${x.status.replace('_', ' ')}</dd>`)}
+${s.received_at ? html`<dt>Lab receipt</dt><dd>${fmtDateTime(s.received_at)} · ${s.receipt_condition}</dd>` : ''}
+${s.tat_due_at ? html`<dt>TAT due</dt><dd>${fmtDate(s.tat_due_at)} · <span class="pill ${tat.paused ? '' : { green: 'good', amber: 'warn', red: 'bad' }[tat.level]}">${tat.paused ? 'paused' : tat.level === 'red' ? 'overdue' : `${tat.daysLeft.toFixed(1)} days left`}</span></dd>` : ''}
+${s.partner_received_at ? html`<dt>Partner lab receipt</dt><dd>${fmtDate(s.partner_received_at)}${s.partner_lab_ref ? ` · ref ${s.partner_lab_ref}` : ''}</dd>` : ''}
+${s.reject_reason ? html`<dt>Rejected</dt><dd>${s.reject_reason}</dd>` : ''}
+${s.hold_reason ? html`<dt>On hold</dt><dd>${s.hold_reason} (since ${fmtDateTime(s.hold_started_at)})</dd>` : ''}
+${original ? html`<dt>Recollection of</dt><dd><a class="mono" href="/samples/${original.sample_id}">${original.sample_id}</a></dd>` : ''}
+${recollection ? html`<dt>Fresh sample</dt><dd><a class="mono" href="/samples/${recollection.sample_id}">${recollection.sample_id}</a></dd>` : ''}
+${!ship.length && !s.received_at ? html`<dt>Next step</dt><dd>${['REGISTERED', 'COLLECTED'].includes(s.status) ? 'Waiting for pickup or lab receipt' : '—'}</dd>` : ''}</dl>
+<div class="actions noprint">
+${s.status === 'RECEIVED_AT_LAB' && t.route === 'in_house' ? html`<form method="post" action="/samples/${s.sample_id}/start-in-house"><button>Start in-house processing</button></form>` : ''}
+${s.status === 'RECEIVED_AT_LAB' && t.route === 'partner_lab' ? html`<a class="btn" href="/tracking/onward">Send to partner lab</a>` : ''}
+${s.status === 'REJECTED' && !recollection ? html`<form method="post" action="/samples/${s.sample_id}/recollect"><button>Register fresh sample (no charge)</button></form>` : ''}
+${s.status === 'ON_HOLD' ? html`<form method="post" action="/samples/${s.sample_id}/release"><button>Release hold</button></form>` : ''}</div>
+${['IN_TRANSIT_TO_PARTNER', 'DISPATCH_TO_PARTNER_SCHEDULED'].includes(s.status) ? html`<form method="post" action="/samples/${s.sample_id}/partner-received" class="noprint" style="margin-top:12px"><input type="hidden" name="back" value="sample">
+<b>Partner lab received it</b><div class="grid" style="margin-top:8px">${field('Date received', 'received_on', today, { type: 'date', required: true, attrs: `max="${today}"` })}${field('Their reference', 'ref', '', { opt: true })}</div>
+<div class="actions"><button>Mark received at partner lab</button></div></form>` : ''}
+${!['ON_HOLD', 'CANCELLED', 'CLOSED', 'DELIVERED', 'REJECTED', 'RECOLLECTION_REQUESTED'].includes(s.status) ? html`<details class="noprint" style="margin-top:12px"><summary>Put on hold</summary>
+<form method="post" action="/samples/${s.sample_id}/hold"><div class="grid">${field('Reason', 'reason', '', { required: true })}</div><div class="actions"><button class="light">Put on hold</button></div></form></details>` : ''}</div>`;
+  }
 
   router.post('/samples/:id/collect', (ctx) => {
     samples.collect(db, ctx.user, ctx.params.id, { collector: ctx.body.collector, collectedAt: ctx.body.collected_at });

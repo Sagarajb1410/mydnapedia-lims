@@ -4,6 +4,7 @@ const { nowIso, istDate, audit, setSetting } = require('./util');
 const auth = require('./auth');
 const admin = require('./admin');
 const billing = require('./billing');
+const tracking = require('./tracking');
 const samples = require('./samples');
 
 const TESTS = [
@@ -91,17 +92,37 @@ function demo(db) {
   };
   const reg = (user, testIdx, extra = {}) => samples.register(db, user, { ...person(), test_id: String(tests[testIdx].id), ...extra }).sample;
 
-  reg(sunUser, 1, { collected_now: 'yes', collector: 'Raj Mehta' });
+  const s1 = reg(sunUser, 1, { collected_now: 'yes', collector: 'Raj Mehta' });
   reg(sunUser, 2);
-  reg(sunUser, 0, { collected_now: 'yes', collector: 'Raj Mehta' });
-  reg(careUser, 3, { collected_now: 'yes', collector: 'Nurse Leela' });
+  const s3 = reg(sunUser, 0, { collected_now: 'yes', collector: 'Raj Mehta' });
+  const c1 = reg(careUser, 3, { collected_now: 'yes', collector: 'Nurse Leela' });
   reg(careUser, 0);
-  reg(careUser, 0, { collected_now: 'yes', collector: 'Nurse Leela' });
+  const c3 = reg(careUser, 0, { collected_now: 'yes', collector: 'Nurse Leela' });
+  const c4 = reg(careUser, 1, { collected_now: 'yes', collector: 'Nurse Leela' });
+  const c5 = reg(careUser, 2, { collected_now: 'yes', collector: 'Nurse Leela' });
   reg(hpUser, 1, { supplier: { patientPricePaise: 1500000, discountPaise: 300000, gstRateBp: 1800 } });
   reg(hpUser, 2, { supplier: { patientPricePaise: 1200000, discountPaise: 0, gstRateBp: 1800 }, collected_now: 'yes', collector: 'Sunita Rao' });
-  reg(lab, 4, { direct: { paymentMode: 'UPI', paymentRef: 'UPI-DEMO-001' }, collected_now: 'yes', collector: 'Lab Staff Demo' });
+  const d1 = reg(lab, 4, { direct: { paymentMode: 'UPI', paymentRef: 'UPI-DEMO-001' }, collected_now: 'yes', collector: 'Lab Staff Demo' });
   const cancelled = reg(lab, 1, { direct: { paymentMode: 'Cash' } });
   samples.cancel(db, lab, cancelled.sample_id, { reason: 'Patient changed their mind (dummy)' });
+
+  // Tracking: one pickup booked, one delivered with a rejection, samples at each lab stage.
+  setSetting(db, 'partnerLabAddress', 'Partner lab, Plot 4, Demo Industrial Area, Bengaluru 560100');
+  const win = tracking.WINDOWS[0];
+  tracking.scheduleLeg1(db, root, { samplePks: [s1.id, s3.id], pickupDate: day, window: win });
+  const leg1 = tracking.scheduleLeg1(db, root, { samplePks: [c1.id, c3.id, c4.id, c5.id], pickupDate: day, window: win, awb: 'DEMO123456' });
+  tracking.markPickedUp(db, lab, leg1.shipmentId);
+  for (const x of [c1, c4, c5]) tracking.receive(db, lab, x.sample_id, { condition: 'Acceptable' });
+  tracking.receive(db, lab, c3.sample_id, { condition: 'Leaked', note: 'Tube cap loose (dummy)' });
+  tracking.receive(db, lab, d1.sample_id, { condition: 'Acceptable' });
+  tracking.startInHouse(db, lab, d1.sample_id);
+  const leg2 = tracking.scheduleLeg2(db, lab, { samplePks: [c4.id, c5.id], pickupDate: day, window: win });
+  tracking.markPickedUp(db, lab, leg2.shipmentId);
+  tracking.partnerReceived(db, lab, c5.sample_id, { receivedOn: day, ref: 'PL-DEMO-0042' });
+  // Pretend two samples arrived weeks ago so the TAT board shows a warning and an overdue case.
+  const ago = (days) => new Date(Date.now() - days * 86400000).toISOString();
+  db.run('UPDATE samples SET received_at = ?, tat_due_at = ? WHERE id = ?', ago(17), ago(-4), c4.id);
+  db.run('UPDATE samples SET received_at = ?, tat_due_at = ? WHERE id = ?', ago(23), ago(2), c5.id);
 
   billing.submitRecharge(db, careUser, { amountPaise: 3000000, mode: 'NEFT', reference: 'UTR-DEMO-7781', paymentDate: day });
   billing.lowBalanceReminders(db);
