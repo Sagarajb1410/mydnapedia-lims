@@ -9,6 +9,7 @@ const crypto = require('node:crypto');
 const { nowIso, audit, UserError, getSetting } = require('./util');
 const notify = require('./notify');
 const pdftext = require('./pdftext');
+const doctext = require('./doctext');
 const samples = require('./samples');
 
 const SOURCE_FROM = {
@@ -59,52 +60,71 @@ function leakTerms(db) {
   return getSetting(db, 'leakTerms').split(/[,\n]/).map((t) => t.trim()).filter((t) => norm(t).length >= 2);
 }
 
-// The release check. Every "problem" blocks; "warnings" are for the reviewer.
-function checkReport(db, buffer, s) {
+// Reads a PDF or Word file into page texts and file properties.
+function readDocument(buffer) {
+  if (buffer.slice(0, 4).toString('latin1') === 'PK\x03\x04') {
+    const d = doctext.extract(buffer);
+    return {
+      format: 'Word', encrypted: false,
+      pages: d.parts.map((p) => ({ text: p.text, label: p.name.replace(/^word\/|\.xml$/g, ''), images: 0 })),
+      meta: [...Object.values(d.info), d.alt].join(' '), images: d.images,
+    };
+  }
+  const d = pdftext.extract(buffer);
+  return { format: 'PDF', encrypted: d.encrypted, pages: d.pages, meta: [...Object.values(d.info), d.xmp].join(' ') };
+}
+
+// The release check, for reports and action plans. Every "problem" blocks;
+// "warnings" are for the reviewer.
+function checkReport(db, buffer, s, { noun = 'report' } = {}) {
   const problems = [];
   const warnings = [];
   let doc;
-  try { doc = pdftext.extract(buffer); } catch (e) {
-    return { ok: false, problems: [`The file could not be read as a PDF (${e.message}).`], warnings, pages: 0 };
+  try { doc = readDocument(buffer); } catch (e) {
+    return { ok: false, problems: [`The file could not be read (${e.message}).`], warnings, pages: 0 };
   }
   if (doc.encrypted) problems.push('The PDF is password-protected or encrypted, so it cannot be checked. Save it again without protection.');
   const terms = leakTerms(db);
   if (!terms.length) problems.push('No partner names are set up to check against. The admin must fill in "Names that must never appear in a released report" under Admin, Settings.');
   const pages = doc.pages;
-  const allText = pages.map((p) => p.text).join('\n');
-  const flat = norm(allText);
-  if (!pages.length) problems.push('The PDF has no pages.');
-  else if (flat.length < 40) problems.push('No readable text was found. A scanned or picture-only report cannot be checked.');
+  const flat = norm(pages.map((p) => p.text).join('\n'));
+  if (!pages.length) problems.push(`The ${noun} has no pages.`);
+  else if (flat.length < 40) problems.push(`No readable text was found. A scanned or picture-only ${noun} cannot be checked.`);
 
-  // Partner names in the page text; whitespace is ignored so split words still match.
-  const hits = [];
+  // Partner names in the text; whitespace is ignored so split words still match.
   pages.forEach((p, i) => {
     const pflat = norm(p.text);
+    const where = doc.format === 'Word' ? `The ${p.label}` : `Page ${i + 1}`;
     for (const t of terms) {
       const at = pflat.indexOf(norm(t));
-      if (at >= 0) hits.push({ page: i + 1, term: t, context: pflat.slice(Math.max(0, at - 25), at + norm(t).length + 25) });
+      if (at >= 0) problems.push(`${where} contains "${t}" (…${pflat.slice(Math.max(0, at - 25), at + norm(t).length + 25)}…).`);
     }
   });
-  for (const h of hits) problems.push(`Page ${h.page} contains "${h.term}" (…${h.context}…).`);
 
-  // File properties and embedded metadata.
-  const meta = [...Object.values(doc.info), doc.xmp].join(' ');
+  // File properties, embedded metadata and picture descriptions.
   for (const t of [...terms, 'Jasper', 'iText']) {
-    if (norm(meta).includes(norm(t))) problems.push(`The file properties mention "${t}". Re-save it from Report Studio, which rewrites them.`);
+    if (norm(doc.meta).includes(norm(t))) problems.push(`The file properties mention "${t}". Re-save it from Report Studio, which rewrites them.`);
   }
 
   if (s.partner_lab_ref && norm(s.partner_lab_ref).length >= 4 && flat.includes(norm(s.partner_lab_ref))) {
-    problems.push(`The partner lab's own reference (${s.partner_lab_ref}) is still in the report.`);
+    problems.push(`The partner lab's own reference (${s.partner_lab_ref}) is still in the ${noun}.`);
   }
-  if (!flat.includes(norm(s.sample_id))) problems.push(`The report does not show this sample's ID (${s.sample_id}). It may belong to another client.`);
-
   const patient = db.get('SELECT full_name FROM patients WHERE id = ?', s.patient_id);
-  if (patient && !flat.includes(norm(patient.full_name))) warnings.push(`The client's name "${patient.full_name}" was not found in the text. Check the cover.`);
-  const sizes = new Set(pages.map((p) => `${p.width}x${p.height}`));
-  if (sizes.size > 1) warnings.push('The pages are not all the same size.');
-  const pictures = pages.map((p, i) => ({ i: i + 1, p })).filter(({ p }) => p.images > 0 && norm(p.text).length < 200).map(({ i }) => i);
-  if (pictures.length) warnings.push(`Pages ${pictures.join(', ')} are mostly pictures. Text inside a picture cannot be checked, so look at these pages closely.`);
-  return { ok: problems.length === 0, problems, warnings, pages: pages.length };
+  if (noun === 'report') {
+    if (!flat.includes(norm(s.sample_id))) problems.push(`The report does not show this sample's ID (${s.sample_id}). It may belong to another client.`);
+  } else if (!flat.includes(norm(s.sample_id)) && !(patient && flat.includes(norm(patient.full_name)))) {
+    problems.push(`The ${noun} shows neither this sample's ID (${s.sample_id}) nor the client's name. It may belong to another client.`);
+  }
+  if (patient && !flat.includes(norm(patient.full_name))) warnings.push(`The client's name "${patient.full_name}" was not found in the text. Check the first page.`);
+  if (doc.format === 'PDF') {
+    const sizes = new Set(pages.map((p) => `${p.width}x${p.height}`));
+    if (sizes.size > 1) warnings.push('The pages are not all the same size.');
+    const pictures = pages.map((p, i) => ({ i: i + 1, p })).filter(({ p }) => p.images > 0 && norm(p.text).length < 200).map(({ i }) => i);
+    if (pictures.length) warnings.push(`Pages ${pictures.join(', ')} are mostly pictures. Text inside a picture cannot be checked, so look at these pages closely.`);
+  } else if (doc.images) {
+    warnings.push(`The document has ${doc.images} picture(s). Text inside a picture cannot be checked, so look at them closely.`);
+  }
+  return { ok: problems.length === 0, problems, warnings, pages: doc.format === 'PDF' ? pages.length : null, format: doc.format };
 }
 
 // Step 1: the partner lab's report or the in-house result.
@@ -253,5 +273,5 @@ function queues(db) {
 }
 
 module.exports = {
-  SOURCE_FROM, BRANDED_FROM, leakTerms, checkReport, uploadSource, uploadBranded, review, release, report, forSample, canOpen, queues,
+  SOURCE_FROM, BRANDED_FROM, leakTerms, readDocument, checkReport, uploadSource, uploadBranded, review, release, report, forSample, canOpen, queues,
 };
