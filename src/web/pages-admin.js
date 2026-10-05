@@ -16,9 +16,10 @@ const SETTING_LABELS = {
   courierName: 'Main courier vendor',
   courierWhatsapp: 'Courier vendor WhatsApp number',
   partnerLabAddress: 'Partner lab address (for onward dispatch; shown only to the courier)',
+  leakTerms: 'Names that must never appear in a released report (partner lab names and brands, comma separated)',
 };
 
-module.exports = function (router, { db }, h) {
+module.exports = function (router, { db, storage }, h) {
   const onlyAdmin = (ctx) => admin.requireAdmin(ctx.user);
   const price = (testId, list) => db.get(
     'SELECT price_paise FROM prices WHERE test_id = ? AND price_list = ? AND effective_from <= ? ORDER BY effective_from DESC, id DESC LIMIT 1',
@@ -193,12 +194,20 @@ ${rows.map((r) => html`<tr><td>${fmtDateTime(r.at)}</td><td>${r.user_name || ''}
 <div class="table-wrap"><table><tr><th>Created</th><th>Message</th><th>To</th><th>Text</th><th></th></tr>
 ${rows.map((n) => html`<tr><td>${fmtDateTime(n.created_at)}<br><span class="muted">${n.code} · ${notify.CODES[n.code] || ''}</span></td>
 <td>${n.channel === 'whatsapp' ? 'WhatsApp' : 'Email'}${n.sample_id ? html`<br><a class="mono" href="/samples/${n.sample_id}">${n.sample_id}</a>` : ''}</td>
-<td>${n.recipient_name || ''}<br><span class="muted">${n.recipient}</span></td><td style="max-width:420px">${n.subject ? html`<b>${n.subject}</b><br>` : ''}${n.body}</td>
+<td>${n.recipient_name || ''}<br><span class="muted">${n.recipient}</span></td><td style="max-width:420px;white-space:pre-line">${n.subject ? html`<b>${n.subject}</b><br>` : ''}${n.body}${n.attachment_key ? html`<br><a href="/outbox/${n.id}/attachment">📎 Download ${n.attachment_name} to attach</a>` : ''}</td>
 <td>${n.status === 'pending' ? html`<div style="display:flex;flex-direction:column;gap:6px">
 <a class="btn small" target="_blank" rel="noopener" href="${n.channel === 'whatsapp' ? notify.whatsappLink(n.recipient, n.body) : notify.mailtoLink(n.recipient, n.subject, n.body)}">Open ${n.channel === 'whatsapp' ? 'WhatsApp' : 'email'}</a>
 <form method="post" action="/outbox/${n.id}"><button class="small light" name="do" value="sent">Mark sent</button> <button class="small light" name="do" value="skip">Skip</button></form></div>`
     : html`<span class="pill ${n.status === 'sent' ? 'good' : ''}">${n.status}</span><br><span class="muted">${n.sent_by_name || ''} ${fmtDateTime(n.sent_at)}</span>`}</td></tr>`)}
 ${rows.length ? '' : html`<tr><td colspan="5" class="muted">Nothing here.</td></tr>`}</table></div>`);
+  });
+  router.get('/outbox/:id/attachment', (ctx) => {
+    if (!['admin', 'lab'].includes(ctx.user.role)) throw new UserError('The outbox is for staff.');
+    const n = db.get('SELECT * FROM notifications WHERE id = ?', Number(ctx.params.id));
+    if (!n || !n.attachment_key) throw new UserError('This message has no attachment.');
+    h.raw(ctx, 'application/pdf', storage.get(n.attachment_key), {
+      'Content-Disposition': `attachment; filename="${n.attachment_name.replace(/[^A-Za-z0-9._-]/g, '_')}"`, 'X-Content-Type-Options': 'nosniff',
+    });
   });
   router.post('/outbox/:id', (ctx) => {
     if (!['admin', 'lab'].includes(ctx.user.role)) throw new UserError('The outbox is for staff.');

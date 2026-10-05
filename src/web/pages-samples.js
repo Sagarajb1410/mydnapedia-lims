@@ -197,6 +197,7 @@ ${bill.payment_mode ? html`<dt>Paid by</dt><dd>${bill.payment_mode}${bill.paymen
 ${sbill ? html`<dt>Patient bill</dt><dd>${sbill.bill_no}: ${rupees(sbill.patient_price_paise)} − ${rupees(sbill.discount_paise)} + GST ${rupees(sbill.gst_paise)} = <b>${rupees(sbill.total_paise)}</b></dd>` : ''}
 </dl>` : html`<p class="muted">No bill.</p>`}</div>
 ${isStaff(u) ? trackingCard(s, t) : ''}
+${isStaff(u) ? h.reportCard(u, s, t) : ''}
 <div class="card"><h2 style="margin-top:0">Timeline</h2><ul class="timeline">${events.map((e) => html`<li><b>${samples.STATUSES[e.to_status]}</b><br><span class="muted">${fmtDateTime(e.at)}${e.user_name ? ` · ${e.user_name}` : ''}</span>${e.note ? html`<br>${e.note}` : ''}</li>`)}</ul></div>
 </div>
 ${canCancel ? html`<details class="card noprint"><summary><b>Cancel this sample</b></summary>

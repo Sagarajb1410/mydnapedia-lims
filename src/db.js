@@ -241,6 +241,35 @@ const MIGRATIONS = [
   );
   CREATE INDEX shipment_items_sample ON shipment_items(sample_pk);
   `,
+  // 3: reports (partner or in-house result, white-labelled report, approval, release)
+  `
+  CREATE TABLE reports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sample_pk INTEGER NOT NULL REFERENCES samples(id),
+    kind TEXT NOT NULL CHECK (kind IN ('source','branded')),
+    version INTEGER NOT NULL,
+    file_key TEXT NOT NULL,
+    file_name TEXT NOT NULL,
+    sha256 TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    pages INTEGER,
+    uploaded_by INTEGER REFERENCES users(id),
+    uploaded_at TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('received','blocked','pending','rejected','approved','released','superseded')),
+    check_json TEXT,
+    reviewed_by INTEGER REFERENCES users(id),
+    reviewed_at TEXT,
+    review_note TEXT,
+    released_by INTEGER REFERENCES users(id),
+    released_at TEXT,
+    UNIQUE (sample_pk, kind, version)
+  );
+  CREATE INDEX reports_sample ON reports(sample_pk);
+  ALTER TABLE samples ADD COLUMN released_at TEXT;
+  ALTER TABLE samples ADD COLUMN tat_met INTEGER;
+  ALTER TABLE notifications ADD COLUMN attachment_key TEXT;
+  ALTER TABLE notifications ADD COLUMN attachment_name TEXT;
+  `,
 ];
 
 // Audit rows must never change: block UPDATE and DELETE at database level.

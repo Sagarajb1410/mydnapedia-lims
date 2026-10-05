@@ -68,6 +68,7 @@ const SETTING_DEFAULTS = {
   courierName: 'Main courier vendor',
   courierWhatsapp: '',
   partnerLabAddress: '',
+  leakTerms: '',
 };
 
 function getSetting(db, key) {

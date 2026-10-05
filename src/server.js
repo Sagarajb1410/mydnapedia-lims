@@ -19,7 +19,7 @@ const { createApp } = require('./web/app');
 const db = dbm.open(path.join(config.dataDir, 'lims.sqlite'));
 
 if (process.argv.includes('--demo')) {
-  if (seed.demo(db)) {
+  if (seed.demo(db, storage.create())) {
     console.log('\nDummy data added. Every demo account uses the password: ' + seed.DEMO_PASSWORD);
     console.log('  admin@mydnapedia.example  (admin)');
     console.log('  lab@demo.example          (lab staff)');
