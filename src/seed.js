@@ -6,6 +6,8 @@ const admin = require('./admin');
 const billing = require('./billing');
 const tracking = require('./tracking');
 const samples = require('./samples');
+const reports = require('./reports');
+const pdfwrite = require('./pdfwrite');
 
 const TESTS = [
   { code: 'MDP360P', name: 'MDP 360 Premium', short_name: 'MDP 360 PREMIUM', sample_type: 'Saliva', route: 'partner_lab', tat_days: 21, prices: [24999, 14999, 12999] },
@@ -45,7 +47,7 @@ const CITIES = [['Pune', 'Maharashtra', '411001'], ['Mumbai', 'Maharashtra', '40
 
 // Fills an empty database with invented accounts, users and samples so every
 // screen can be tried. Safe to run only once.
-function demo(db) {
+function demo(db, store = null) {
   if (db.get("SELECT id FROM accounts WHERE code = 'SUNPUN'")) return false;
   firstRun(db, { adminPassword: DEMO_PASSWORD });
   const root = db.get("SELECT u.*, NULL AS account_type FROM users u WHERE role = 'admin' ORDER BY id LIMIT 1");
@@ -123,6 +125,41 @@ function demo(db) {
   const ago = (days) => new Date(Date.now() - days * 86400000).toISOString();
   db.run('UPDATE samples SET received_at = ?, tat_due_at = ? WHERE id = ?', ago(17), ago(-4), c4.id);
   db.run('UPDATE samples SET received_at = ?, tat_due_at = ? WHERE id = ?', ago(23), ago(2), c5.id);
+
+  // Reports (needs file storage): one fully released, one waiting for approval,
+  // one blocked because the partner name was left in. "Acme Genomics" is the
+  // invented partner lab name used only in the demo data.
+  setSetting(db, 'leakTerms', 'Acme Genomics, AcmeGx');
+  if (store) {
+    const pdf = (s, branded, leak) => {
+      const p = db.get('SELECT * FROM patients WHERE id = ?', s.patient_id);
+      const t = db.get('SELECT * FROM tests WHERE id = ?', s.test_id);
+      const head = branded
+        ? [{ text: 'MyDNAPedia', size: 20, bold: true }, { text: t.name, size: 14 }, `Name: ${p.full_name}    Sample ID: ${s.sample_id}`, `Report date: ${day}`]
+        : t.route === 'in_house'
+          ? [{ text: 'Central lab in-house result (dummy)', size: 16, bold: true }, `Name: ${p.full_name}    Sample ID: ${s.sample_id}`]
+          : [{ text: 'Acme Genomics Labs (dummy partner lab)', size: 16, bold: true }, `Name: ${p.full_name}    Sample ID: AGX-${s.id}9917`];
+      const body = ['', { text: 'Your Genetic Result', bold: true }, 'Vitamin D: Likely to need a higher intake', 'Caffeine metabolism: Normal', 'LDL cholesterol: Slightly increased risk', '', 'Dummy report for the test version. Not a real result.'];
+      const foot = leak ? ['', 'Analysed by Acme Genomics Labs, Bengaluru'] : ['', 'Know Your DNA - Make Better Choices - Live Healthier', 'A Unit of TVASTI Health and Wellness Private Limited'];
+      return { filename: branded ? `${s.sample_id}.pdf` : 'partner-report.pdf', type: 'application/pdf', data: pdfwrite.write([[...head, ...body], foot], { title: t.name, author: branded ? 'MyDNAPedia' : 'Acme Genomics' }) };
+    };
+    const c6 = reg(careUser, 2, { collected_now: 'yes', collector: 'Nurse Leela' });
+    const leg1b = tracking.scheduleLeg1(db, root, { samplePks: [c6.id], pickupDate: day, window: win });
+    tracking.markPickedUp(db, lab, leg1b.shipmentId);
+    tracking.receive(db, lab, c6.sample_id, { condition: 'Acceptable' });
+    const leg2b = tracking.scheduleLeg2(db, lab, { samplePks: [c6.id], pickupDate: day, window: win });
+    tracking.markPickedUp(db, lab, leg2b.shipmentId);
+    tracking.partnerReceived(db, lab, c6.sample_id, { receivedOn: day, ref: 'PL-DEMO-0050' });
+    reports.uploadSource(db, store, lab, c6.sample_id, pdf(c6, false));
+    const done = reports.uploadBranded(db, store, lab, c6.sample_id, pdf(c6, true));
+    reports.review(db, store, root, done.id, { approve: true, pagesChecked: true });
+    reports.release(db, store, root, done.id);
+
+    reports.uploadSource(db, store, lab, c5.sample_id, pdf(c5, false));
+    reports.uploadBranded(db, store, lab, c5.sample_id, pdf(c5, true, true));
+    reports.uploadSource(db, store, lab, d1.sample_id, pdf(d1, false));
+    reports.uploadBranded(db, store, lab, d1.sample_id, pdf(d1, true));
+  }
 
   billing.submitRecharge(db, careUser, { amountPaise: 3000000, mode: 'NEFT', reference: 'UTR-DEMO-7781', paymentDate: day });
   billing.lowBalanceReminders(db);

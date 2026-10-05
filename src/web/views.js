@@ -47,7 +47,7 @@ th{font-size:12px;text-transform:uppercase;letter-spacing:.03em;color:var(--quie
 td.num,th.num{text-align:right;white-space:nowrap}.table-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:10px}
 .pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:600;background:#e8eef1;color:#33444c;white-space:nowrap}
 .pill.good{background:var(--good-bg);color:var(--good)}.pill.warn{background:var(--warn-bg);color:var(--warn)}.pill.bad{background:var(--bad-bg);color:var(--bad)}
-.flash{padding:10px 14px;border-radius:8px;margin-bottom:14px}.flash.error{background:var(--bad-bg);color:var(--bad)}.flash.ok{background:var(--good-bg);color:var(--good)}.flash.warn{background:var(--warn-bg);color:var(--warn)}
+.flash{padding:10px 14px;border-radius:8px;margin-bottom:14px;overflow-wrap:anywhere}.flash.error{background:var(--bad-bg);color:var(--bad)}.flash.ok{background:var(--good-bg);color:var(--good)}.flash.warn{background:var(--warn-bg);color:var(--warn)}
 .neg{color:var(--bad)}.muted{color:var(--quiet)}.mono{font-family:ui-monospace,Menlo,Consolas,monospace}
 dl.facts{display:grid;grid-template-columns:180px 1fr;gap:6px 12px;margin:0}dl.facts dt{color:var(--quiet)}dl.facts dd{margin:0}
 .timeline{list-style:none;padding:0;margin:0}.timeline li{padding:8px 0 8px 18px;border-left:2px solid var(--line);position:relative}
@@ -59,8 +59,8 @@ dl.facts{display:grid;grid-template-columns:180px 1fr;gap:6px 12px;margin:0}dl.f
 `;
 
 const NAV = {
-  admin: [['/', 'Dashboard'], ['/samples', 'Samples'], ['/samples/new', 'Register'], ['/tracking', 'Tracking'], ['/billing', 'Billing'], ['/outbox', 'Outbox'], ['/admin', 'Admin'], ['/audit', 'Audit']],
-  lab: [['/', 'Dashboard'], ['/samples', 'Samples'], ['/samples/new', 'Register'], ['/tracking', 'Tracking'], ['/outbox', 'Outbox']],
+  admin: [['/', 'Dashboard'], ['/samples', 'Samples'], ['/samples/new', 'Register'], ['/tracking', 'Tracking'], ['/reports', 'Reports'], ['/billing', 'Billing'], ['/outbox', 'Outbox'], ['/admin', 'Admin']],
+  lab: [['/', 'Dashboard'], ['/samples', 'Samples'], ['/samples/new', 'Register'], ['/tracking', 'Tracking'], ['/reports', 'Reports'], ['/outbox', 'Outbox']],
   partner: [['/samples', 'Registration'], ['/samples/new', 'New sample'], ['/billing', 'Billing']],
   counsellor: [['/', 'Dashboard']],
 };
@@ -84,7 +84,7 @@ ${user ? html`<nav>${nav.map(([h, l]) => html`<a href="${h}" class="${active(h) 
 <main>${flash ? html`<div class="flash ${flash.type}">${flash.text}</div>` : ''}${body}</main></body></html>`;
 }
 
-const STATUS_TONE = { CANCELLED: 'bad', REJECTED: 'bad', RECEIVED_AT_LAB: 'good', ON_HOLD: 'warn', RECOLLECTION_REQUESTED: 'warn', DELIVERED: 'good', CLOSED: 'good', COLLECTED: '', REGISTERED: '' };
+const STATUS_TONE = { CANCELLED: 'bad', REJECTED: 'bad', RECEIVED_AT_LAB: 'good', REPORT_RELEASED: 'good', REPORT_APPROVED: 'good', REPORT_WHITE_LABELLED: 'warn', ON_HOLD: 'warn', RECOLLECTION_REQUESTED: 'warn', DELIVERED: 'good', CLOSED: 'good', COLLECTED: '', REGISTERED: '' };
 
 function statusPill(code, label) {
   return html`<span class="pill ${STATUS_TONE[code] || ''}">${label}</span>`;

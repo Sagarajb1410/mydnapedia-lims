@@ -34,7 +34,7 @@ function parseCookies(header) {
   return out;
 }
 
-const MAX_BODY = 12 * 1024 * 1024;
+const MAX_BODY = 40 * 1024 * 1024;
 
 function readBody(req) {
   return new Promise((resolve, reject) => {
@@ -42,7 +42,7 @@ function readBody(req) {
     let size = 0;
     req.on('data', (c) => {
       size += c.length;
-      if (size > MAX_BODY) { reject(new Error('The upload is too large (limit 12 MB).')); req.destroy(); return; }
+      if (size > MAX_BODY) { reject(new Error('The upload is too large (limit 40 MB).')); req.destroy(); return; }
       chunks.push(c);
     });
     req.on('end', () => resolve(Buffer.concat(chunks)));

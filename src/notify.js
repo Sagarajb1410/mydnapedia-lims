@@ -15,16 +15,18 @@ const CODES = {
   N9: 'Sample rejected, fresh sample needed',
   N10: 'Onward dispatch booked',
   N11: 'TAT warning',
+  N12: 'Report waiting for approval',
+  N13: 'Report ready',
   N16: 'Cancellation and credit reversal',
 };
 
 function queue(db, n) {
   if (!n.recipient) return null;
   const r = db.run(
-    `INSERT INTO notifications (code, channel, recipient_name, recipient, subject, body, sample_pk, account_id, created_at, day)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO notifications (code, channel, recipient_name, recipient, subject, body, sample_pk, account_id, created_at, day, attachment_key, attachment_name)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     n.code, n.channel, n.recipientName || null, n.recipient, n.subject || null, n.body,
-    n.samplePk || null, n.accountId || null, nowIso(), n.day || istDate(),
+    n.samplePk || null, n.accountId || null, nowIso(), n.day || istDate(), n.attachmentKey || null, n.attachmentName || null,
   );
   return Number(r.lastInsertRowid);
 }
