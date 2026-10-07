@@ -1,5 +1,5 @@
 // Admin pages (tests, prices, accounts, users, settings, audit) and the outbox.
-const { html, raw, field, select, roleLabel } = require('./views');
+const { html, raw, field, select, roleLabel, icon } = require('./views');
 const admin = require('../admin');
 const notify = require('../notify');
 const samples = require('../samples');
@@ -28,11 +28,12 @@ module.exports = function (router, { db, storage }, h) {
 
   router.get('/admin', (ctx) => {
     onlyAdmin(ctx);
-    h.send(ctx, 'Admin', html`<h1>Admin</h1>
-<div class="grid"><a class="card" href="/admin/tests"><b>Tests and prices</b><br><span class="muted">Test catalogue, price lists, TAT and processing route</span></a>
-<a class="card" href="/admin/accounts"><b>B2B partners and suppliers</b><br><span class="muted">Accounts, GSTIN, contacts, reminder levels</span></a>
-<a class="card" href="/admin/users"><b>People</b><br><span class="muted">Sign-ins and roles</span></a>
-<a class="card" href="/audit"><b>Audit trail</b><br><span class="muted">Every change, who and when</span></a></div>
+    const tile = (href, ic, title, text) => html`<a class="tile" href="${href}"><span class="ti">${icon(ic)}</span><span><b>${title}</b><small>${text}</small></span></a>`;
+    h.send(ctx, 'Admin', html`<div class="head"><div><h1>Admin</h1><p class="sub">Tests, prices, accounts, people and system settings.</p></div></div>
+<div class="tiles">${tile('/admin/tests', 'samples', 'Tests and prices', 'Test catalogue, price lists, TAT and processing route')}
+${tile('/admin/accounts', 'billing', 'B2B partners and suppliers', 'Accounts, GSTIN, contacts, reminder levels')}
+${tile('/admin/users', 'register', 'People', 'Sign-ins and roles')}
+${tile('/audit', 'reports', 'Audit trail', 'Every change, who and when')}</div>
 <h2>Settings</h2><form method="post" action="/admin/settings" class="card"><div class="grid">
 ${Object.keys(SETTING_DEFAULTS).map((k) => field(SETTING_LABELS[k] || k, k, getSetting(db, k)))}
 </div><div class="actions"><button>Save settings</button></div></form>`);
@@ -190,7 +191,7 @@ ${rows.map((r) => html`<tr><td>${fmtDateTime(r.at)}</td><td>${r.user_name || ''}
         WHERE ${show === 'pending' ? "n.status = 'pending'" : "n.status != 'pending'"} ORDER BY n.id DESC LIMIT 200`);
     h.send(ctx, 'Outbox', html`<h1>Outbox</h1>
 <p class="sub">In this test version nothing is sent automatically. Open a message to see it ready in WhatsApp or your mail app, send it, then mark it sent. Only send to your own test numbers while using dummy data.</p>
-<div class="filters"><a class="btn ${show === 'pending' ? '' : 'light'} small" href="/outbox">Waiting</a><a class="btn ${show === 'done' ? '' : 'light'} small" href="/outbox?show=done">Sent or skipped</a></div>
+<nav class="seg"><a class="${show === 'pending' ? 'on' : ''}" href="/outbox">Waiting</a><a class="${show === 'done' ? 'on' : ''}" href="/outbox?show=done">Sent or skipped</a></nav>
 <div class="table-wrap"><table><tr><th>Created</th><th>Message</th><th>To</th><th>Text</th><th></th></tr>
 ${rows.map((n) => html`<tr><td>${fmtDateTime(n.created_at)}<br><span class="muted">${n.code} · ${notify.CODES[n.code] || ''}</span></td>
 <td>${n.channel === 'whatsapp' ? 'WhatsApp' : 'Email'}${n.sample_id ? html`<br><a class="mono" href="/samples/${n.sample_id}">${n.sample_id}</a>` : ''}</td>
