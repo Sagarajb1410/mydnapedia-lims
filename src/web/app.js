@@ -103,8 +103,9 @@ ${field('New password again', 'confirm', '', { type: 'password', required: true 
   require('./pages-counselling')(router, ctxBase, helpers);
   require('./pages-billing')(router, ctxBase, helpers);
   require('./pages-admin')(router, ctxBase, helpers);
+  require('./pages-studio')(router, ctxBase, helpers);
 
-  const PUBLIC = new Set(['/login']);
+  const PUBLIC = new Set(['/login', '/studio/api']);
   const isPublic = (p) => PUBLIC.has(p) || p.startsWith('/static/');
 
   async function handle(req, res) {

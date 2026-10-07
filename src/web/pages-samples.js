@@ -5,6 +5,7 @@ const samples = require('../samples');
 const billing = require('../billing');
 const barcode = require('../barcode');
 const tracking = require('../tracking');
+const invoice = require('../invoice');
 const { fmtDateTime, fmtDate, rupees, toPaise, UserError, getSetting, istDate } = require('../util');
 
 const PAY_MODES = ['Cash', 'UPI', 'Card', 'Bank transfer', ['pending', 'Payment pending']];
@@ -356,32 +357,61 @@ ${Array.from({ length: copies }, () => label)}<script>setTimeout(()=>print(),300
   // ---------- Bill ----------
   router.get('/samples/:id/bill', (ctx) => {
     if (ctx.user.role === 'counsellor') throw new UserError('Bills are not available to counsellors.');
-    const { s, p, t, a, bill, sbill } = loadFull(ctx);
-    if (!bill) throw new UserError('This sample has no bill.');
-    let head;
-    let lines;
-    if (sbill) {
-      // Supplier bills carry the supplier's name and GSTIN, never MyDNAPedia as seller.
-      head = html`<h1>${a.legal_name || a.name}</h1><p>${a.address || ''}<br>GSTIN: ${a.gstin || ''}</p><h2>Bill ${sbill.bill_no}</h2>`;
-      lines = html`<tr><td>${t.name}</td><td class="num">${rupees(sbill.patient_price_paise)}</td></tr>
-${sbill.discount_paise ? html`<tr><td>Discount</td><td class="num">−${rupees(sbill.discount_paise)}</td></tr>` : ''}
-<tr><td>Taxable value</td><td class="num">${rupees(sbill.net_paise)}</td></tr><tr><td>GST @ ${sbill.gst_rate_bp / 100}%</td><td class="num">${rupees(sbill.gst_paise)}</td></tr>
-<tr><th>Total</th><th class="num">${rupees(sbill.total_paise)}</th></tr>`;
-    } else {
-      head = html`<h1>${getSetting(db, 'labName')}</h1><p>${getSetting(db, 'unitLine')}${getSetting(db, 'companyGstin') ? html`<br>GSTIN: ${getSetting(db, 'companyGstin')}` : ''}</p>
-<h2>${bill.payer === 'credit' ? 'Credit memo' : 'Bill'} ${bill.bill_no}</h2>`;
-      lines = html`<tr><td>${t.name}</td><td class="num">${rupees(bill.list_price_paise)}</td></tr>
-${bill.discount_paise ? html`<tr><td>Discount</td><td class="num">−${rupees(bill.discount_paise)}</td></tr>` : ''}
-<tr><th>${bill.payer === 'credit' ? `Deducted from ${a.name} credit` : 'Total'}</th><th class="num">${rupees(bill.net_paise)}</th></tr>`;
-    }
-    h.raw(ctx, 'text/html; charset=utf-8', html`<!doctype html><html><head><meta charset="utf-8"><title>Bill ${s.sample_id}</title><style>
-body{font:14px/1.5 Arial,sans-serif;max-width:720px;margin:24px auto;padding:0 16px}h1{margin:0;font-size:22px}h2{font-size:16px;margin:16px 0 4px}
-table{width:100%;border-collapse:collapse;margin-top:12px}td,th{padding:6px 8px;border-bottom:1px solid #ddd;text-align:left}.num{text-align:right}
-.note{color:#666;font-size:12px;margin-top:24px}@media print{button{display:none}}</style></head><body>
-<button onclick="print()" style="float:right">Print</button>${head}
-<p>Date: ${fmtDate(bill.created_at)}<br>Patient: ${p.full_name} · ${p.gender} · Mobile ${p.mobile}<br>Sample ID: ${s.sample_id}
-${bill.status === 'reversed' ? html`<br><b>Cancelled and reversed</b>` : ''}${bill.status === 'refunded' ? html`<br><b>Cancelled and refunded</b>` : ''}</p>
-<table>${lines}</table>${bill.payment_mode ? html`<p>Paid by ${bill.payment_mode}${bill.payment_ref ? ` (ref ${bill.payment_ref})` : ''}</p>` : ''}
-<p class="note">Test version bill with dummy data. GST invoice format to be confirmed with the accountant before real use.</p></body></html>`.toString());
+    const full = loadFull(ctx);
+    if (!full.bill) throw new UserError('This sample has no bill.');
+    const v = invoice.build(db, full);
+    const { amt } = invoice;
+    const pct = (n) => `${Number(n.toFixed(2))}%`;
+    const party = (x, gst) => html`<b>${x.name}</b>${x.sub ? html`<br>${x.sub}` : ''}${x.address ? html`<br>${x.address}` : ''}
+${gst && x.gstin ? html`<br>GSTIN/UIN: ${x.gstin}` : ''}${x.state ? html`<br>State Name : ${x.state}${x.stateCode ? `, Code : ${x.stateCode}` : ''}` : ''}
+${x.phone ? html`<br>Contact : ${x.phone}` : ''}${x.email ? html`<br>E-Mail : ${x.email}` : ''}`;
+    const meta = (l, val) => html`<td><span>${l}</span><b>${val || ''}</b></td>`;
+    const it = v.item;
+    h.raw(ctx, 'text/html; charset=utf-8', html`<!doctype html><html><head><meta charset="utf-8"><title>${v.title} ${v.invoiceNo}</title><style>
+@page{size:A4;margin:10mm}
+body{font:11px/1.35 Arial,Helvetica,sans-serif;color:#000;margin:0;background:#e9ecef}
+.sheet{width:190mm;margin:16px auto;background:#fff;padding:6mm;box-shadow:0 1px 6px rgba(0,0,0,.15);position:relative}
+.top{display:flex;justify-content:space-between;align-items:end;margin-bottom:2px}.top h1{font-size:15px;margin:0 auto;letter-spacing:.02em}.top i{font-size:10px;position:absolute;right:6mm}
+table{width:100%;border-collapse:collapse}td,th{border:1px solid #000;padding:3px 5px;vertical-align:top}th{font-weight:normal;text-align:center}
+.box>tbody>tr>td{padding:0}.meta td{width:50%;height:30px}.meta span{display:block;font-size:10px}.meta b{display:block}
+.party{padding:4px 6px!important;height:auto}.party small{display:block;font-size:10px}
+.items td{border-top:0;border-bottom:0}.items tr.blank td{height:120px}.items tr.tot td{border-top:1px solid #000;border-bottom:1px solid #000}
+.r{text-align:right}.c{text-align:center}.b{font-weight:bold}.words{border-bottom:0!important}
+.tax th,.tax td{font-size:10px}.foot td{border:0}.sign{text-align:right;height:60px;vertical-align:bottom!important}
+.cancel{position:absolute;top:45%;left:0;right:0;text-align:center;font-size:56px;color:rgba(200,0,0,.18);transform:rotate(-20deg);font-weight:bold;pointer-events:none}
+.bar{font:13px system-ui;padding:10px;background:#1b2a35;color:#fff;display:flex;gap:12px;align-items:center;justify-content:center}.bar button{font:inherit;padding:5px 14px;border-radius:6px;border:0;background:#f9b300;font-weight:600;cursor:pointer}
+.test{font:10px Arial;color:#555;text-align:center;margin-top:6px}
+@media print{body{background:#fff}.sheet{margin:0;box-shadow:none;padding:0;width:auto}.bar{display:none}}
+</style></head><body><div class="bar">Laid out like a Tally invoice. <button onclick="print()">Print or save as PDF</button></div>
+<div class="sheet">${v.cancelled ? html`<div class="cancel">${v.cancelled.toUpperCase()}</div>` : ''}
+<div class="top"><h1>${v.title}</h1><i>(ORIGINAL FOR RECIPIENT)</i></div>
+<table class="box"><tr><td style="width:50%"><table><tr><td class="party" style="border:0;border-bottom:1px solid #000">${party(v.seller, true)}</td></tr>
+<tr><td class="party" style="border:0"><small>Buyer (Bill to)</small>${party(v.buyer, true)}</td></tr></table></td>
+<td><table class="meta">
+<tr>${meta('Invoice No.', v.invoiceNo)}${meta('Dated', v.date)}</tr>
+<tr>${meta('Sample ID', v.sampleId)}${meta('Mode/Terms of Payment', v.payment)}</tr>
+<tr>${meta('Patient', v.patient)}${meta('Other References', '')}</tr>
+<tr>${meta("Buyer's Order No.", '')}${meta('Dated', '')}</tr>
+<tr><td colspan="2" style="height:60px"><span>Terms of Delivery</span><b style="font-weight:normal">Report delivered by email after testing.</b></td></tr>
+</table></td></tr></table>
+<table class="items" style="border-top:0"><tr><th style="width:6%">Sl<br>No.</th><th>Description of Services</th><th style="width:11%">HSN/SAC</th><th style="width:9%">Quantity</th><th style="width:11%">Rate</th><th style="width:5%">per</th>${it.discPct ? html`<th style="width:7%">Disc. %</th>` : ''}<th style="width:14%">Amount</th></tr>
+<tr><td class="c">1</td><td class="b">${it.description}</td><td class="c">${it.sac}</td><td class="r b">1 No.</td><td class="r">${amt(it.rate)}</td><td>No.</td>${it.discPct ? html`<td class="r">${pct(it.discPct)}</td>` : ''}<td class="r b">${amt(it.amount)}</td></tr>
+${v.taxes.map((x) => html`<tr><td></td><td class="r b"><i>Output ${x.name}</i></td><td></td><td></td><td class="r">${pct(x.rate)}</td><td></td>${it.discPct ? html`<td></td>` : ''}<td class="r b">${amt(x.amount)}</td></tr>`)}
+<tr class="blank"><td></td><td></td><td></td><td></td><td></td><td></td>${it.discPct ? html`<td></td>` : ''}<td></td></tr>
+<tr class="tot"><td></td><td class="r">Total</td><td></td><td class="r b">1 No.</td><td></td><td></td>${it.discPct ? html`<td></td>` : ''}<td class="r b">₹ ${amt(v.total)}</td></tr>
+<tr><td colspan="${it.discPct ? 8 : 7}" class="words" style="border:1px solid #000;border-bottom:0"><div style="display:flex;justify-content:space-between"><span>Amount Chargeable (in words)</span><i>E. &amp; O.E</i></div><b>${v.words}</b></td></tr></table>
+${v.taxes.length ? html`<table class="tax"><tr><th rowspan="2">HSN/SAC</th><th rowspan="2">Taxable<br>Value</th>
+${v.inter ? html`<th colspan="2">Integrated Tax</th>` : html`<th colspan="2">Central Tax</th><th colspan="2">State Tax</th>`}<th rowspan="2">Total<br>Tax Amount</th></tr>
+<tr>${v.taxes.map(() => html`<th>Rate</th><th>Amount</th>`)}</tr>
+<tr><td>${it.sac}</td><td class="r">${amt(v.taxable)}</td>${v.taxes.map((x) => html`<td class="r">${pct(x.rate)}</td><td class="r">${amt(x.amount)}</td>`)}<td class="r">${amt(v.tax)}</td></tr>
+<tr class="b"><td class="r">Total</td><td class="r">${amt(v.taxable)}</td>${v.taxes.map((x) => html`<td></td><td class="r">${amt(x.amount)}</td>`)}<td class="r">${amt(v.tax)}</td></tr>
+<tr><td colspan="${3 + v.taxes.length * 2}" style="border-bottom:0">Tax Amount (in words) : <b>${v.taxWords}</b></td></tr></table>` : ''}
+<table><tr><td style="width:50%;border-right:0;border-top:0">
+${v.seller.pan ? html`Company's PAN : <b>${v.seller.pan}</b><br><br>` : ''}<u>Declaration</u><br>We declare that this invoice shows the actual price of the services described and that all particulars are true and correct.</td>
+<td style="border-left:0;border-top:0">${v.seller.bank ? html`Company's Bank Details<br>Bank Name : <b>${v.seller.bank.name}</b><br>A/c No. : <b>${v.seller.bank.account}</b><br>Branch &amp; IFS Code : <b>${v.seller.bank.ifsc}</b>` : ''}</td></tr>
+<tr><td style="border-right:0"></td><td class="sign" style="border-left:0"><b>for ${v.seller.name}</b><br><br><br>Authorised Signatory</td></tr></table>
+${v.jurisdiction ? html`<p class="c" style="margin:6px 0 0">SUBJECT TO ${v.jurisdiction.toUpperCase()} JURISDICTION</p>` : ''}
+<p class="c" style="margin:2px 0 0">This is a Computer Generated Invoice</p>
+<p class="test">Test version with dummy data. SAC code and GST rate to be confirmed with the accountant before real use.</p></div></body></html>`.toString());
   });
 };

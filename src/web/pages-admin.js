@@ -3,6 +3,7 @@ const { html, raw, field, select, roleLabel, icon } = require('./views');
 const admin = require('../admin');
 const notify = require('../notify');
 const samples = require('../samples');
+const studio = require('../studio');
 const { fmtDateTime, rupees, UserError, getSetting, setSetting, SETTING_DEFAULTS, istDate } = require('../util');
 
 const SETTING_LABELS = {
@@ -13,6 +14,15 @@ const SETTING_LABELS = {
   sampleIdPrefix: 'Sample ID prefix',
   companyGstin: 'MyDNAPedia GSTIN',
   companyAddress: 'Company address',
+  companyLegalName: 'Company legal name (on invoices)',
+  companyState: 'Company state (decides CGST + SGST or IGST)',
+  companyPan: 'Company PAN',
+  invoiceSac: 'SAC code for tests (confirm with your accountant)',
+  invoiceGstRate: 'GST rate % included in test prices (0 = bill of supply)',
+  bankName: 'Bank name (on invoices)',
+  bankAccount: 'Bank account number',
+  bankIfsc: 'Bank branch and IFSC',
+  jurisdiction: 'Jurisdiction city (invoice footer)',
   courierName: 'Main courier vendor',
   courierWhatsapp: 'Courier vendor WhatsApp number',
   partnerLabAddress: 'Partner lab address (for onward dispatch; shown only to the courier)',
@@ -34,6 +44,15 @@ module.exports = function (router, { db, storage }, h) {
 ${tile('/admin/accounts', 'billing', 'B2B partners and suppliers', 'Accounts, GSTIN, contacts, reminder levels')}
 ${tile('/admin/users', 'register', 'People', 'Sign-ins and roles')}
 ${tile('/audit', 'reports', 'Audit trail', 'Every change, who and when')}</div>
+<h2 id="report-centre">Report Centre</h2><div class="card">${(() => {
+  const st = studio.status(storage);
+  return html`<p style="margin-top:0">${st.installed
+    ? html`<span class="pill ${st.linked ? 'good' : 'warn'}">${st.linked ? 'Installed and linked' : 'Installed, not linked'}</span> ${st.from === 'bundled' ? 'Using the copy that came with the LIMS.' : 'Using the copy you installed.'}`
+    : html`<span class="pill warn">Not installed</span> Staff cannot open Report Centre until it is installed.`}</p>
+<p class="muted">Report Centre converts the partner's report, holds the counselling form and drafts the action plan. It runs in the browser, so client data stays inside our system. Install a new version by choosing the Report Studio HTML file; its built-in partner names are removed and the names under Settings are used instead.</p>
+<form method="post" action="/admin/studio" enctype="multipart/form-data"><label for="studio-file">Report Studio HTML file</label><input id="studio-file" type="file" name="file" accept=".html,text/html" required>
+<div class="actions"><button class="light">Install</button></div></form>`;
+})()}</div>
 <h2>Settings</h2><form method="post" action="/admin/settings" class="card"><div class="grid">
 ${Object.keys(SETTING_DEFAULTS).map((k) => field(SETTING_LABELS[k] || k, k, getSetting(db, k)))}
 </div><div class="actions"><button>Save settings</button></div></form>`);
@@ -43,6 +62,7 @@ ${Object.keys(SETTING_DEFAULTS).map((k) => field(SETTING_LABELS[k] || k, k, getS
     onlyAdmin(ctx);
     const prefix = (ctx.body.sampleIdPrefix || '').trim().toUpperCase();
     if (!/^[A-Z]{2,5}$/.test(prefix)) throw new UserError('The sample ID prefix must be 2 to 5 letters.');
+    if ('invoiceGstRate' in ctx.body && !['0', '5', '12', '18', '28'].includes(String(ctx.body.invoiceGstRate).trim())) throw new UserError('The GST rate must be 0, 5, 12, 18 or 28.');
     for (const k of Object.keys(SETTING_DEFAULTS)) if (k in ctx.body) setSetting(db, k, k === 'sampleIdPrefix' ? prefix : String(ctx.body[k]).trim());
     require('../util').audit(db, ctx.user.id, 'settings_changed', 'settings', null, ctx.body);
     h.redirect(ctx, '/admin', { type: 'ok', text: 'Settings saved.' });

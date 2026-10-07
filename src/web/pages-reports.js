@@ -4,6 +4,7 @@ const reports = require('../reports');
 const samples = require('../samples');
 const tracking = require('../tracking');
 const { fmtDateTime, fmtDate, UserError } = require('../util');
+const { head: centreHead } = require('./pages-studio');
 
 const REPORT_STATUS = { received: 'Received', blocked: 'Blocked', pending: 'Waiting for approval', rejected: 'Sent back', approved: 'Approved', released: 'Released', superseded: 'Replaced' };
 const REPORT_TONE = { blocked: 'bad', rejected: 'bad', pending: 'warn', approved: 'good', released: 'good' };
@@ -41,8 +42,10 @@ ${branded[0] && ['blocked', 'pending'].includes(branded[0].status) ? checkResult
 ${canSource ? html`<form method="post" action="/samples/${s.sample_id}/report/source" enctype="multipart/form-data" class="noprint" style="margin-top:12px">
 <label for="source-file">${sources.length ? `Replace the ${sourceLabel.toLowerCase()}` : `Add the ${sourceLabel.toLowerCase()}`} (PDF)</label><input id="source-file" type="file" name="file" accept="application/pdf" required>
 <div class="actions"><button class="${canBranded ? 'light' : ''}">Upload</button></div></form>` : ''}
+${canBranded && sources.length ? html`<div class="actions noprint" style="margin-top:12px">${h.studioButton('Convert in Report Centre', s.sample_id, 'convert', '')}</div>
+<p class="muted" style="margin:4px 0 0">Report Centre opens with this partner report and the client's details loaded. Send the result back from its LIMS tab.</p>` : ''}
 ${canBranded ? html`<form method="post" action="/samples/${s.sample_id}/report/branded" enctype="multipart/form-data" class="noprint" style="margin-top:12px">
-<label for="branded-file">White-labelled report from Report Studio (PDF)</label><input id="branded-file" type="file" name="file" accept="application/pdf" required>
+<label for="branded-file">Or upload the white-labelled report by hand (PDF)</label><input id="branded-file" type="file" name="file" accept="application/pdf" required>
 <p class="muted" style="margin:4px 0 0">It is checked for partner names, the partner's reference and this sample's ID before anyone can approve it.</p>
 <div class="actions"><button>Upload and check</button></div></form>` : ''}
 ${pending && user.role === 'admin' ? html`<form method="post" action="/reports/${pending.id}/review" class="noprint" style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px">
@@ -68,7 +71,12 @@ ${rows.map((r) => {
 <td>${statusPill(r.status, samples.STATUSES[r.status])}</td><td>${extra ? extra(r) : t ? html`<span class="pill ${t.level === 'red' ? 'bad' : t.level === 'amber' ? 'warn' : 'good'}">${t.level === 'red' ? 'Overdue' : `${t.daysLeft.toFixed(1)} days left`}</span>` : ''}</td></tr>`;
   })}
 ${rows.length ? '' : html`<tr><td colspan="5" class="muted">${empty}</td></tr>`}</table></div>`;
-    h.send(ctx, 'Reports', html`<h1>Reports</h1><p class="sub">From the partner lab or in-house result, to a checked and approved MyDNAPedia report.</p>
+    const step = (n, title, text) => html`<div class="kpi"><span class="k">Step ${n}</span><b style="font-size:16px;margin-top:6px">${title}</b><small>${text}</small></div>`;
+    h.send(ctx, 'Reports', html`${centreHead(ctx.user, '/reports', 'Partner report to a checked, approved MyDNAPedia report, then counselling and the action plan.')}
+<div class="kpis">${step(1, 'Partner report in', 'Upload the PDF the partner lab sent, on the sample page.')}
+${step(2, 'Convert', `Open the sample in Report Centre. It loads the partner PDF and the client's details for you.`)}
+${step(3, 'Send to the LIMS', 'On the LIMS tab in Report Centre, send the report. The LIMS blocks any partner name.')}
+${step(4, 'Approve and release', 'The admin looks at every page, then releases it to the client.')}</div>
 <h2>1. Waiting for the result (${q.awaitingSource.length})</h2>${table(q.awaitingSource, 'Nothing waiting.')}
 <h2>2. Waiting for the white-labelled report (${q.awaitingBranded.length})</h2>${table(q.awaitingBranded, 'Nothing waiting.')}
 <h2>3. Waiting for approval (${q.awaitingApproval.length})</h2>${table(q.awaitingApproval, 'Nothing waiting.')}
@@ -79,13 +87,13 @@ ${rows.length ? '' : html`<tr><td colspan="5" class="muted">${empty}</td></tr>`}
   // ---------- Uploads and decisions ----------
   router.post('/samples/:id/report/source', (ctx) => {
     reports.uploadSource(db, storage, ctx.user, ctx.params.id, ctx.files.file);
-    h.redirect(ctx, `/samples/${ctx.params.id}`, { type: 'ok', text: 'Saved. Next, make the white-labelled report in Report Studio and upload it here.' });
+    h.redirect(ctx, `/samples/${ctx.params.id}`, { type: 'ok', text: 'Saved. Next, convert it in Report Centre.' });
   });
   router.post('/samples/:id/report/branded', (ctx) => {
     const r = reports.uploadBranded(db, storage, ctx.user, ctx.params.id, ctx.files.file);
     h.redirect(ctx, `/samples/${ctx.params.id}`, r.check.ok
       ? { type: 'ok', text: 'The report passed the check and is waiting for the admin to approve it.' }
-      : { type: 'error', text: 'The report was blocked. See what was found below, fix it in Report Studio and upload it again.' });
+      : { type: 'error', text: 'The report was blocked. See what was found below, fix it in Report Centre and send it again.' });
   });
   router.post('/reports/:id/review', (ctx) => {
     const r = reports.report(db, ctx.params.id);

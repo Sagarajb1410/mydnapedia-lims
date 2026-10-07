@@ -1,6 +1,7 @@
 // Module 5: counselling screens (work list, booking, form, case file, action plan).
 const { html, raw, field, select, statusPill } = require('./views');
 const counselling = require('../counselling');
+const { head: centreHead } = require('./pages-studio');
 const form = require('../counselling-form');
 const reports = require('../reports');
 const samples = require('../samples');
@@ -46,7 +47,7 @@ ${field('Meeting link', 'link', session && session.status === 'scheduled' ? sess
 ${user.role === 'admin' ? select('Counsellor', 'counsellor', cs.map((c) => [c.id, c.name]), s.counsellor_id || (cs[0] && cs[0].id), { required: true }) : ''}</div>
 <div class="actions"><button>${s.status === 'COUNSELLING_SCHEDULED' ? 'Rebook and message the client' : 'Book and message the client'}</button></div></form>`;
     return html`<div class="card"><h2 style="margin-top:0">Counselling</h2><dl class="facts">
-<dt>Report</dt><dd>${released ? html`<a href="/reports/${released.id}/file" target="_blank">Open the released report</a>` : '—'}${source && mayAct ? html` · <a href="/reports/${source.id}/file" target="_blank">partner's original (for Report Studio)</a>` : ''}</dd>
+<dt>Report</dt><dd>${released ? html`<a href="/reports/${released.id}/file" target="_blank">Open the released report</a>` : '—'}${source && mayAct ? html` · <a href="/reports/${source.id}/file" target="_blank">partner's original</a>` : ''}</dd>
 ${session ? html`<dt>Session</dt><dd>${fmtDateTime(session.scheduled_at)} · ${session.mode} with ${session.counsellor_name}<br><span class="pill ${session.status === 'done' ? 'good' : session.status === 'no_show' ? 'bad' : ''}">${{ scheduled: 'Booked', done: 'Held', no_show: 'Did not attend', cancelled: 'Cancelled' }[session.status]}</span>${session.meeting_link ? html` <a href="${session.meeting_link}" target="_blank" rel="noopener">Meeting link</a>` : ''}</dd>` : ''}
 <dt>Counselling form</dt><dd>${f ? html`<span class="pill ${f.status === 'complete' ? 'good' : 'warn'}">${f.status === 'complete' ? 'Complete' : 'Draft'}</span> · updated ${fmtDateTime(f.updated_at)}` : 'Not started'}</dd></dl>
 ${!mayAct ? html`<p class="muted">This client is booked with another counsellor.</p>` : ''}
@@ -54,15 +55,16 @@ ${mayAct && ['REPORT_RELEASED', 'COUNSELLING_SCHEDULED'].includes(s.status) ? bo
 ${mayAct && s.status === 'COUNSELLING_SCHEDULED' ? html`<form method="post" action="/samples/${s.sample_id}/counselling/outcome" class="noprint" style="margin-top:12px;border-top:1px solid var(--line);padding-top:12px">
 <b>After the session</b><div style="margin-top:6px">${field('Note', 'note', '', { opt: true })}</div>
 <div class="actions"><button name="outcome" value="done">Session held</button><button class="light" name="outcome" value="no_show">Client did not attend</button></div></form>` : ''}
-${mayAct && counselling.FORM_OPEN.includes(s.status) ? html`<div class="actions noprint"><a class="btn ${f && f.status === 'complete' ? 'light' : ''}" href="/samples/${s.sample_id}/counselling/form">${f ? 'Open the counselling form' : 'Fill in the counselling form'}</a>
-<a class="btn light" href="/samples/${s.sample_id}/counselling/case-file">Download case file for Report Studio</a></div>
-<p class="muted" style="margin:6px 0 0">In Report Studio: open the case file, then load the partner's original PDF (the client's name must match), build the action plan and save it as Word.</p>` : ''}
+${mayAct && counselling.FORM_OPEN.includes(s.status) ? html`<div class="actions noprint">${h.studioButton('Counselling form in Report Centre', s.sample_id, 'form', f && f.status === 'complete' ? 'light' : '')}
+${['COUNSELLING_DONE', 'ACTION_PLAN_DRAFTED'].includes(s.status) ? h.studioButton('Action plan in Report Centre', s.sample_id, 'plan', f && f.status === 'complete' ? '' : 'light') : ''}
+<a class="btn light" href="/samples/${s.sample_id}/counselling/form">${f ? 'Form on this screen' : 'Fill the form on this screen'}</a></div>
+<p class="muted" style="margin:6px 0 0">Report Centre opens with this client's details, saved form and the partner's results loaded. On its LIMS tab, send the counselling form, case file and action plan back here. A case sent from Report Centre also fills in the form on this screen.</p>` : ''}
 ${plans.length ? html`<h3 style="margin:16px 0 6px;font-size:15px">Action plan</h3><div class="table-wrap"><table><tr><th>File</th><th>Uploaded</th><th>Status</th></tr>
 ${plans.map((r) => html`<tr><td><a href="/plans/${r.id}/file">Action plan v${r.version}</a> <span class="muted">(${r.file_type === 'docx' ? 'Word' : 'PDF'})</span></td><td>${fmtDateTime(r.uploaded_at)}<br><span class="muted">${r.uploaded_by_name || ''}</span></td>
 <td><span class="pill ${PLAN_TONE[r.status] || ''}">${PLAN_STATUS[r.status]}</span>${r.review_note ? html`<br><span class="muted">${r.reviewed_by_name}: ${r.review_note}</span>` : ''}</td></tr>`)}</table></div>
 ${['blocked', 'pending'].includes(plans[0].status) ? checkBox(plans[0].check) : ''}` : ''}
 ${mayAct && ['COUNSELLING_DONE', 'ACTION_PLAN_DRAFTED'].includes(s.status) ? html`<form method="post" action="/samples/${s.sample_id}/plan" enctype="multipart/form-data" class="noprint" style="margin-top:12px">
-<label for="plan-file">Action plan from Report Studio (Word or PDF)</label><input id="plan-file" type="file" name="file" accept=".docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" required>
+<label for="plan-file">Or upload the action plan by hand (Word or PDF)</label><input id="plan-file" type="file" name="file" accept=".docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" required>
 <p class="muted" style="margin:4px 0 0">${f && f.status === 'complete' ? 'It is checked for partner names and the client\'s details before the admin approves it.' : 'Complete the counselling form before uploading the plan.'}</p>
 <div class="actions"><button>Upload and check</button></div></form>` : ''}
 ${pending && user.role === 'admin' ? html`<form method="post" action="/plans/${pending.id}/review" class="noprint" style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px">
@@ -88,15 +90,31 @@ ${rows.map((r) => html`<tr><td><a href="/samples/${r.sample_id}">${r.full_name}<
 <td>${r.counsellor_name || html`<span class="muted">Not assigned</span>`}</td><td>${col[1](r)}</td></tr>`)}
 ${rows.length ? '' : html`<tr><td colspan="4" class="muted">${empty}</td></tr>`}</table></div>`;
     const formPill = (r) => html`<span class="pill ${r.form_status === 'complete' ? 'good' : 'warn'}">${r.form_status === 'complete' ? 'Form complete' : r.form_status === 'draft' ? 'Form in draft' : 'Form not started'}</span>`;
-    h.send(ctx, 'Counselling', html`<h1>Counselling</h1><p class="sub">${ctx.user.role === 'counsellor' ? 'Your clients and clients not yet assigned.' : 'All clients from report release to the action plan.'}</p>
+    const mine = ctx.user.role === 'counsellor' ? 'Your clients and clients not yet assigned.' : 'All clients from report release to the action plan.';
+    h.send(ctx, 'Counselling', html`${centreHead(ctx.user, '/counselling', `Counselling: book the session and fill in the counselling form. ${mine}`)}
 <div class="stats"><div class="stat"><b>${q.toBook.length}</b><span>To book</span></div><div class="stat"><b>${q.booked.length}</b><span>Sessions booked</span></div>
-<div class="stat"><b>${q.planToDo.length}</b><span>Action plans to prepare</span></div><div class="stat"><b>${q.awaitingApproval.length}</b><span>Plans waiting for approval</span></div><div class="stat"><b>${q.toSend.length}</b><span>Plans to send</span></div></div>
+<div class="stat"><b>${q.planToDo.length}</b><span>Action plans to prepare</span></div></div>
 <h2>Book a session (${q.toBook.length})</h2>${table(q.toBook, 'Nobody is waiting.', ['Report released', (r) => fmtDate(r.released_at)])}
-<h2>Booked (${q.booked.length})</h2>${table(q.booked, 'No sessions booked.', ['Session', (r) => html`${fmtDateTime(r.session_at)}<br>${formPill(r)}`])}
+<h2>Booked (${q.booked.length})</h2>${table(q.booked, 'No sessions booked.', ['Session', (r) => html`${fmtDateTime(r.session_at)}<br>${formPill(r)}`])}`);
+  });
+
+  router.get('/plans', (ctx) => {
+    allowed(ctx);
+    const q = counselling.queues(db, ctx.user);
+    const table = (rows, empty, col) => html`<div class="table-wrap"><table><tr><th>Client</th><th>Test</th><th>Counsellor</th><th>${col[0]}</th><th></th></tr>
+${rows.map((r) => html`<tr><td><a href="/samples/${r.sample_id}">${r.full_name}</a><br><span class="mono muted">${r.sample_id}</span></td><td>${r.test_name}</td>
+<td>${r.counsellor_name || html`<span class="muted">Not assigned</span>`}</td><td>${col[1](r)}</td>
+<td>${r.status === 'COUNSELLING_DONE' || r.status === 'ACTION_PLAN_DRAFTED' ? h.studioButton('Open', r.sample_id, 'plan') : ''}</td></tr>`)}
+${rows.length ? '' : html`<tr><td colspan="5" class="muted">${empty}</td></tr>`}</table></div>`;
+    const formPill = (r) => html`<span class="pill ${r.form_status === 'complete' ? 'good' : 'warn'}">${r.form_status === 'complete' ? 'Form complete' : r.form_status === 'draft' ? 'Form in draft' : 'Form not started'}</span>`;
+    const st = (r) => statusPill(r.status, samples.STATUSES[r.status]);
+    h.send(ctx, 'Action plans', html`${centreHead(ctx.user, '/plans', 'Action plans: drafted in Report Centre from the genes and the counselling form, approved by the admin, then sent to the client.')}
+<div class="stats"><div class="stat"><b>${q.planToDo.length}</b><span>To prepare</span></div><div class="stat"><b>${q.awaitingApproval.length}</b><span>Waiting for approval</span></div>
+<div class="stat"><b>${q.toSend.length}</b><span>To send</span></div><div class="stat"><b>${q.delivered.length}</b><span>Delivered</span></div></div>
 <h2>Prepare the action plan (${q.planToDo.length})</h2>${table(q.planToDo, 'Nothing to prepare.', ['Form', formPill])}
-<h2>Waiting for approval (${q.awaitingApproval.length})</h2>${table(q.awaitingApproval, 'Nothing waiting.', ['Status', (r) => statusPill(r.status, samples.STATUSES[r.status])])}
-<h2>Approved, send to client (${q.toSend.length})</h2>${table(q.toSend, 'Nothing to send.', ['Status', (r) => statusPill(r.status, samples.STATUSES[r.status])])}
-<h2>Delivered (${q.delivered.length})</h2>${table(q.delivered, 'None yet.', ['Status', (r) => statusPill(r.status, samples.STATUSES[r.status])])}`);
+<h2>Waiting for approval (${q.awaitingApproval.length})</h2>${table(q.awaitingApproval, 'Nothing waiting.', ['Status', st])}
+<h2>Approved, send to client (${q.toSend.length})</h2>${table(q.toSend, 'Nothing to send.', ['Status', st])}
+<h2>Delivered (${q.delivered.length})</h2>${table(q.delivered, 'None yet.', ['Status', st])}`);
   });
 
   // ---------- Booking and outcome ----------
@@ -112,7 +130,7 @@ ${rows.length ? '' : html`<tr><td colspan="4" class="muted">${empty}</td></tr>`}
     const formDone = f && f.status === 'complete';
     if (ctx.body.outcome !== 'done') return h.redirect(ctx, `/samples/${ctx.params.id}`, { type: 'ok', text: 'Marked as not attended. Book the session again.' });
     h.redirect(ctx, formDone ? `/samples/${ctx.params.id}` : `/samples/${ctx.params.id}/counselling/form`,
-      { type: 'ok', text: formDone ? 'Session marked as held. Download the case file for Report Studio to prepare the action plan.' : 'Session marked as held. Complete the counselling form.' });
+      { type: 'ok', text: formDone ? 'Session marked as held. Prepare the action plan in Report Centre.' : 'Session marked as held. Complete the counselling form.' });
   });
 
   // ---------- Counselling form ----------
@@ -158,7 +176,7 @@ ${sec === 'A1' ? html`<p class="muted" style="margin-top:-4px">BMI: <b>${bmi == 
     const complete = ctx.body.do === 'complete';
     counselling.saveForm(db, ctx.user, ctx.params.id, ctx.body, { complete });
     h.redirect(ctx, complete ? `/samples/${ctx.params.id}` : `/samples/${ctx.params.id}/counselling/form`,
-      { type: 'ok', text: complete ? 'Counselling form complete. Download the case file for Report Studio to prepare the action plan.' : 'Draft saved.' });
+      { type: 'ok', text: complete ? 'Counselling form complete. Prepare the action plan in Report Centre.' : 'Draft saved.' });
   });
 
   router.get('/samples/:id/counselling/case-file', (ctx) => {
