@@ -12,7 +12,7 @@ Built so far, in the guideline's priority order:
 
 5. **Counselling and the action plan:** once a report is released, counsellors see the client on their Counselling screen and book the session; the client's WhatsApp and email invite go to the outbox. Counsellors fill in the counselling form on screen (the same fields as the Report Studio worksheet, with BMI worked out) and download a case file that opens in Report Studio. Report Studio then drafts the action plan from the partner's original PDF. The plan (Word or PDF) is uploaded back and checked like reports, the admin approves it, the counsellor sends it to the client and the admin closes the case.
 
-Also included: sign-in with roles (admin, lab staff, B2B partner, B2B supplier, counsellor), each partner seeing only their own samples and ledger, an audit trail that cannot be edited, test catalogue and price lists, accounts and people management, and an outbox for WhatsApp and email messages.
+Also included: a **monthly report** (Business, Monthly report) showing how many samples the lab processed in a month and how many came from each franchise, partner and supplier, with an Excel download; sign-in with roles (admin, lab staff, B2B partner, B2B supplier, counsellor), each partner seeing only their own samples and ledger, an audit trail that cannot be edited, test catalogue and price lists, accounts and people management, and an outbox for WhatsApp and email messages.
 
 All five modules of the guideline are in. Converting partner reports and drafting action plans inside the LIMS (instead of in Report Studio) can come later.
 
@@ -49,6 +49,6 @@ Nothing in the code needs rebuilding. Settings come from environment variables (
 ## For developers
 
 - Node.js only, no packages to install. `npm test` runs the checks; `npm start` starts without dummy data (the first admin's one-time password is printed and saved in `data/FIRST-SIGN-IN.txt`).
-- Code: `src/samples.js` (registration and statuses), `src/billing.js` (pricing, ledger, reminders), `src/tracking.js` (pickups, receipt, dispatch, TAT), `src/reports.js` and `src/pdftext.js` (report upload, leak check, approval, release), `src/studio.js` (Report Centre link), `src/counselling.js`, `src/counselling-form.js` and `src/doctext.js` (sessions, form, case file, action plan), `src/admin.js` (master data), `src/web/` (pages), `src/db.js` (schema and migrations).
+- Code: `src/samples.js` (registration and statuses), `src/billing.js` (pricing, ledger, reminders), `src/tracking.js` (pickups, receipt, dispatch, TAT), `src/reports.js` and `src/pdftext.js` (report upload, leak check, approval, release), `src/studio.js` (Report Centre link), `src/counselling.js`, `src/counselling-form.js` and `src/doctext.js` (sessions, form, case file, action plan), `src/admin.js` (master data), `src/monthly.js` and `src/xlsx.js` (monthly report and Excel writer), `src/web/` (pages), `src/db.js` (schema and migrations).
 - The partner lab is never named anywhere in the code, screens or messages.
 - Look and feel: `src/web/views.js` holds the colours, type and app shell; `src/web/journey.js` groups the statuses into the six parts of the sample journey. The Montserrat typeface in `src/web/static/` is © The Montserrat Project Authors, used under the SIL Open Font License 1.1, and is served from the app itself so it works offline.
