@@ -35,10 +35,10 @@ test('main screens render for every role', async () => {
     for (const f of ['logo-sm.png', 'montserrat-400.ttf', 'art.svg']) assert.strictEqual((await fetch(`${base}/static/${f}`)).status, 200, f);
     assert.strictEqual((await fetch(`${base}/static/nope.js`)).status, 404);
     const roles = {
-      'admin@mydnapedia.example': ['/', '/samples', '/samples?phase=lab', '/samples?status=REJECTED', '/samples/new', '/samples/MDP26-000008', '/samples/MDP26-000015', '/tracking', '/tracking/pickups', '/tracking/receive', '/tracking/onward', '/reports', '/counselling', '/billing', '/outbox', '/admin', '/admin/tests', '/admin/accounts', '/admin/users', '/audit', '/password'],
+      'admin@mydnapedia.example': ['/', '/samples', '/samples?phase=lab', '/samples?status=REJECTED', '/samples/new', '/samples/MDP26-000008', '/samples/MDP26-000015', '/tracking', '/tracking/pickups', '/tracking/receive', '/tracking/onward', '/reports', '/counselling', '/plans', '/billing', '/outbox', '/admin', '/admin/tests', '/admin/accounts', '/admin/users', '/audit', '/password'],
       'lab@demo.example': ['/', '/samples', '/tracking', '/reports'],
       'sunrise@demo.example': ['/samples', '/samples/new', '/billing'],
-      'counsellor@demo.example': ['/counselling', '/samples'],
+      'counsellor@demo.example': ['/counselling', '/plans', '/samples'],
     };
     for (const [email, paths] of Object.entries(roles)) {
       const cookie = await signIn(base, email);

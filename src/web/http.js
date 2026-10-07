@@ -94,13 +94,15 @@ async function parseRequest(req) {
   const query = Object.fromEntries(url.searchParams);
   let body = {};
   let files = {};
+  let raw = null;
   if (req.method === 'POST') {
     const buf = await readBody(req);
     const ct = req.headers['content-type'] || '';
     if (ct.startsWith('multipart/form-data')) ({ fields: body, files } = parseMultipart(buf, ct));
+    else if (ct.startsWith('text/plain') || ct.startsWith('application/json')) raw = buf;
     else body = parseUrlEncoded(buf);
   }
-  return { path: url.pathname, query, body, files, cookies: parseCookies(req.headers.cookie) };
+  return { path: url.pathname, query, body, files, raw, cookies: parseCookies(req.headers.cookie) };
 }
 
 module.exports = { Router, parseRequest, parseMultipart, parseCookies };
