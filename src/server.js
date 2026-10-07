@@ -3,7 +3,7 @@
 //   node src/server.js --demo   first run fills the database with dummy data
 const [major, minor] = process.versions.node.split('.').map(Number);
 if (major < 22 || (major === 22 && minor < 13)) {
-  console.error(`This LIMS needs Node.js 22.13 or newer (you have ${process.versions.node}). Install the LTS version from https://nodejs.org and start again.`);
+  console.error(`\n  This LIMS needs Node.js 22.13 or newer, and this computer has ${process.versions.node}.\n  Install the LTS version from https://nodejs.org and start again.\n`);
   process.exit(1);
 }
 const path = require('node:path');
@@ -48,7 +48,27 @@ runReminders();
 setInterval(runReminders, 3600 * 1000).unref();
 
 const app = createApp({ db, storage: storage.create() });
-app.server().listen(config.port, config.host, () => {
-  console.log(`MyDNAPedia LIMS (test version) is running. Open http://${config.host === '0.0.0.0' ? 'localhost' : config.host}:${config.port} in your browser.`);
-  console.log('Keep this window open while you use it. Press Ctrl+C to stop.');
+const url = `http://${config.host === '0.0.0.0' ? 'localhost' : config.host}:${config.port}`;
+
+// --open starts the browser once the LIMS is ready (used by the start files).
+function openBrowser() {
+  const { spawn } = require('node:child_process');
+  const [cmd, args] = process.platform === 'win32' ? ['cmd', ['/c', 'start', '', url]] : process.platform === 'darwin' ? ['open', [url]] : ['xdg-open', [url]];
+  try { spawn(cmd, args, { detached: true, stdio: 'ignore' }).on('error', () => {}).unref(); } catch { /* open it by hand */ }
+}
+
+const server = app.server();
+server.on('error', (e) => {
+  if (e.code === 'EADDRINUSE') {
+    console.error(`\n  Port ${config.port} is already in use. The LIMS is probably already running in another window:\n  open ${url} in your browser, or close the other window and start again.\n`);
+    if (process.argv.includes('--open')) openBrowser();
+  } else {
+    console.error(e);
+  }
+  process.exit(1);
+});
+server.listen(config.port, config.host, () => {
+  console.log(`  MyDNAPedia LIMS (test version) is running at ${url}`);
+  console.log('  Keep this window open while you use it. Press Ctrl+C to stop.');
+  if (process.argv.includes('--open')) openBrowser();
 });
