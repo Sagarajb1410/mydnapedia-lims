@@ -6,6 +6,7 @@ const billing = require('../billing');
 const barcode = require('../barcode');
 const tracking = require('../tracking');
 const invoice = require('../invoice');
+const track = require('../track');
 const { fmtDateTime, fmtDate, rupees, toPaise, UserError, getSetting, istDate } = require('../util');
 
 const PAY_MODES = ['Cash', 'UPI', 'Card', 'Bank transfer', ['pending', 'Payment pending']];
@@ -239,6 +240,7 @@ ${s.clinical_notes ? html`<dt>Clinical notes</dt><dd>${s.clinical_notes}</dd>` :
 ${isStaff(u) ? html`<dt>Processing</dt><dd>${ROUTE_LABEL[t.route]} · TAT ${t.tat_days} days from lab receipt</dd>` : ''}
 <dt>Registered by</dt><dd>${a.name} · ${regBy ? regBy.name : ''}</dd><dt>Registered</dt><dd>${fmtDateTime(s.registered_at)}</dd>
 <dt>Collected</dt><dd>${s.collected_at ? html`${fmtDateTime(s.collected_at)} by ${s.collector}` : 'Not yet'}</dd>
+<dt>Patient tracking</dt><dd><a href="${track.link(s.sample_id)}" target="_blank" rel="noopener">${track.link(s.sample_id)}</a><br><small class="muted">The patient opens it with the last 4 digits of their mobile. It is in their registration message.</small></dd>
 ${s.partner_ref ? html`<dt>Reference</dt><dd>${s.partner_ref}</dd>` : ''}${s.referring_doctor ? html`<dt>Doctor</dt><dd>${s.referring_doctor}</dd>` : ''}
 ${s.duplicate_reason ? html`<dt>Repeat reason</dt><dd>${s.duplicate_reason}</dd>` : ''}${s.cancel_reason ? html`<dt>Cancelled</dt><dd>${s.cancel_reason}</dd>` : ''}</dl>
 ${s.status === 'REGISTERED' && u.role !== 'counsellor' ? html`<form method="post" action="/samples/${s.sample_id}/collect" class="noprint" style="margin-top:16px;border-top:1px solid var(--line);padding-top:14px">

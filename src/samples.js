@@ -2,6 +2,7 @@
 const { nowIso, istDate, audit, nextCounter, UserError, getSetting } = require('./util');
 const billing = require('./billing');
 const notify = require('./notify');
+const track = require('./track');
 
 // Full lifecycle from guideline section 4. Modules 1 and 2 use the first two
 // and the side statuses; the rest are switched on as later modules are built.
@@ -172,7 +173,7 @@ function register(db, user, input) {
     if (collectedNow) collect(db, user, sample.sample_id, { collector, collectedAt: now });
 
     const lab = getSetting(db, 'labName');
-    const msg = `${lab}: Dear ${patient.full_name}, your ${test.name} test has been registered. Your sample ID is ${sampleId}. We will keep you updated. For help contact ${getSetting(db, 'supportPhone')}.`;
+    const msg = `${lab}: Dear ${patient.full_name}, your ${test.name} test has been registered. Your sample ID is ${sampleId}. Track your sample any time at ${track.link(sampleId)} using this ID and the last 4 digits of your mobile. For help contact ${getSetting(db, 'supportPhone')}.`;
     notify.queue(db, { code: 'N1', channel: 'whatsapp', recipient: patient.mobile, recipientName: patient.full_name, body: msg, samplePk: pk });
     notify.queue(db, { code: 'N1', channel: 'email', recipient: patient.email, recipientName: patient.full_name, subject: `Your ${test.name} test is registered`, body: msg, samplePk: pk });
 
