@@ -142,3 +142,27 @@ test('demo data shows a released, a pending and a blocked report', () => {
   const st = new Set(db.all("SELECT status FROM reports WHERE kind = 'branded'").map((r) => r.status));
   assert.deepEqual([...st].sort(), ['blocked', 'pending', 'released']);
 });
+
+test('a pictures-only report needs the admin to check it by eye, and an approved report can still be replaced', () => {
+  const { db, store, admin, lab } = fresh();
+  const s = atPartner(db, lab);
+  reports.uploadSource(db, store, lab, s.sample_id, file(['partner report']));
+  const pic = reports.uploadBranded(db, store, lab, s.sample_id, file(['', '']));
+  assert.equal(pic.check.ok, false);
+  assert.equal(pic.check.pictureOnly, true);
+  assert.equal(reports.report(db, pic.id).status, 'pending');
+  assert.throws(() => reports.review(db, store, admin, pic.id, { approve: true, pagesChecked: true }), /pictures only/);
+  reports.review(db, store, admin, pic.id, { approve: true, pagesChecked: true, picturesChecked: true });
+  assert.equal(db.get('SELECT status FROM samples WHERE id = ?', s.id).status, 'REPORT_APPROVED');
+  // A corrected version replaces the approved one before release.
+  const ok = [`Report Person ${s.sample_id}`, 'Result text long enough to be a real report page for checking.'];
+  const v2 = reports.uploadBranded(db, store, lab, s.sample_id, file(ok));
+  assert.equal(v2.version, 2);
+  assert.equal(reports.report(db, pic.id).status, 'superseded');
+  assert.equal(db.get('SELECT status FROM samples WHERE id = ?', s.id).status, 'REPORT_WHITE_LABELLED');
+  reports.review(db, store, admin, v2.id, { approve: true, pagesChecked: true });
+  reports.release(db, store, admin, v2.id);
+  assert.equal(db.get('SELECT status FROM samples WHERE id = ?', s.id).status, 'REPORT_RELEASED');
+  // A partner name in readable text still blocks outright.
+  assert.equal(reports.checkReport(db, pdfwrite.write([[...ok, 'Acme Genomics']]), db.get('SELECT * FROM samples WHERE id = ?', s.id)).pictureOnly, false);
+});

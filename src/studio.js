@@ -218,9 +218,9 @@ function api(db, storage, req) {
     switch (req.kind) {
       case 'report':
         r = reports.uploadBranded(db, storage, user, s.sample_id, file);
-        if (!r.check.ok) throw new UserError(`Blocked by the LIMS check: ${r.check.problems.join(' ')}`);
+        if (!r.check.ok && !r.check.pictureOnly) throw new UserError(`Blocked by the LIMS check: ${r.check.problems.join(' ')}`);
         audit(db, user.id, 'report_centre_push', 'sample', s.sample_id, { kind: 'report', version: r.version });
-        return { status: true, stage: stage(), skipped: `Stored as v${r.version}. It passed the check and waits for the admin's approval in the LIMS` };
+        return { status: true, stage: stage(), skipped: `Stored as v${r.version}. ${r.check.ok ? 'It passed the check' : 'It is pictures only, so the admin checks it by eye,'} and waits for the admin's approval in the LIMS` };
       case 'partner_report':
         r = reports.uploadSource(db, storage, user, s.sample_id, file);
         return { status: true, stage: stage() };

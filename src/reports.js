@@ -18,7 +18,8 @@ const SOURCE_FROM = {
 };
 const COUNSELLING_STAGES = ['REPORT_RELEASED', 'COUNSELLING_SCHEDULED', 'COUNSELLING_DONE', 'ACTION_PLAN_DRAFTED', 'ACTION_PLAN_APPROVED', 'DELIVERED', 'CLOSED'];
 const SOURCE_TO = { partner_lab: 'PARTNER_REPORT_RECEIVED', in_house: 'RESULT_READY' };
-const BRANDED_FROM = ['PARTNER_REPORT_RECEIVED', 'RESULT_READY', 'REPORT_WHITE_LABELLED'];
+// A corrected report can replace the current one until it is released.
+const BRANDED_FROM = ['PARTNER_REPORT_RECEIVED', 'RESULT_READY', 'REPORT_WHITE_LABELLED', 'REPORT_APPROVED'];
 const MAX_BYTES = 40 * 1024 * 1024;
 
 function requireStaff(user) {
@@ -89,8 +90,12 @@ function checkReport(db, buffer, s, { noun = 'report' } = {}) {
   if (!terms.length) problems.push('No partner names are set up to check against. The admin must fill in "Names that must never appear in a released report" under Admin, Settings.');
   const pages = doc.pages;
   const flat = norm(pages.map((p) => p.text).join('\n'));
+  // A report made only of pictures has no text to check. That alone does not
+  // block it: the admin can approve it after checking every page by eye.
+  const noText = pages.length > 0 && flat.length < 40;
+  const textProblems = [];
   if (!pages.length) problems.push(`The ${noun} has no pages.`);
-  else if (flat.length < 40) problems.push(`No readable text was found. A scanned or picture-only ${noun} cannot be checked.`);
+  else if (noText) textProblems.push(`No readable text was found, so the LIMS cannot check this ${noun}. It is made of pictures (scanned, or saved as images).`);
 
   // Partner names in the text; whitespace is ignored so split words still match.
   pages.forEach((p, i) => {
@@ -111,21 +116,27 @@ function checkReport(db, buffer, s, { noun = 'report' } = {}) {
     problems.push(`The partner lab's own reference (${s.partner_lab_ref}) is still in the ${noun}.`);
   }
   const patient = db.get('SELECT full_name FROM patients WHERE id = ?', s.patient_id);
-  if (noun === 'report') {
+  if (noText) {
+    // Nothing below can be read; the by-eye check covers it.
+  } else if (noun === 'report') {
     if (!flat.includes(norm(s.sample_id))) problems.push(`The report does not show this sample's ID (${s.sample_id}). It may belong to another client.`);
   } else if (!flat.includes(norm(s.sample_id)) && !(patient && flat.includes(norm(patient.full_name)))) {
     problems.push(`The ${noun} shows neither this sample's ID (${s.sample_id}) nor the client's name. It may belong to another client.`);
   }
-  if (patient && !flat.includes(norm(patient.full_name))) warnings.push(`The client's name "${patient.full_name}" was not found in the text. Check the first page.`);
+  if (patient && !noText && !flat.includes(norm(patient.full_name))) warnings.push(`The client's name "${patient.full_name}" was not found in the text. Check the first page.`);
   if (doc.format === 'PDF') {
     const sizes = new Set(pages.map((p) => `${p.width}x${p.height}`));
     if (sizes.size > 1) warnings.push('The pages are not all the same size.');
     const pictures = pages.map((p, i) => ({ i: i + 1, p })).filter(({ p }) => p.images > 0 && norm(p.text).length < 200).map(({ i }) => i);
-    if (pictures.length) warnings.push(`Pages ${pictures.join(', ')} are mostly pictures. Text inside a picture cannot be checked, so look at these pages closely.`);
+    if (pictures.length && !noText) warnings.push(`Pages ${pictures.join(', ')} are mostly pictures. Text inside a picture cannot be checked, so look at these pages closely.`);
   } else if (doc.images) {
     warnings.push(`The document has ${doc.images} picture(s). Text inside a picture cannot be checked, so look at them closely.`);
   }
-  return { ok: problems.length === 0, problems, warnings, pages: doc.format === 'PDF' ? pages.length : null, format: doc.format };
+  const pictureOnly = noText && problems.length === 0;
+  return {
+    ok: problems.length === 0 && !noText, pictureOnly, problems: [...problems, ...textProblems], warnings,
+    pages: doc.format === 'PDF' ? pages.length : null, format: doc.format,
+  };
 }
 
 // Step 1: the partner lab's report or the in-house result.
@@ -159,21 +170,23 @@ function uploadBranded(db, storage, user, sampleId, file) {
     }
     const check = checkReport(db, file.data, s);
     const { version, key, sha256 } = store(db, storage, s, 'branded', file);
-    db.run("UPDATE reports SET status = 'superseded' WHERE sample_pk = ? AND kind = 'branded' AND status IN ('pending','blocked')", s.id);
+    db.run("UPDATE reports SET status = 'superseded' WHERE sample_pk = ? AND kind = 'branded' AND status IN ('pending','blocked','approved')", s.id);
+    const passable = check.ok || check.pictureOnly;
     const id = Number(db.run(
       `INSERT INTO reports (sample_pk, kind, version, file_key, file_name, sha256, size, pages, uploaded_by, uploaded_at, status, check_json)
        VALUES (?, 'branded', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      s.id, version, key, `${s.sample_id}.pdf`, sha256, file.data.length, check.pages, user.id, nowIso(), check.ok ? 'pending' : 'blocked', JSON.stringify(check),
+      s.id, version, key, `${s.sample_id}.pdf`, sha256, file.data.length, check.pages, user.id, nowIso(), passable ? 'pending' : 'blocked', JSON.stringify(check),
     ).lastInsertRowid);
-    if (check.ok) {
-      if (s.status !== 'REPORT_WHITE_LABELLED') setStatus(db, s, 'REPORT_WHITE_LABELLED', user, `White-labelled report v${version} passed the check; waiting for approval`);
+    const passed = check.ok ? 'passed the check' : 'is pictures only and needs a by-eye check';
+    if (passable) {
+      if (s.status !== 'REPORT_WHITE_LABELLED') setStatus(db, s, 'REPORT_WHITE_LABELLED', user, `White-labelled report v${version} ${passed}; waiting for approval`);
       else db.run('INSERT INTO sample_events (sample_pk, from_status, to_status, at, user_id, note) VALUES (?, ?, ?, ?, ?, ?)', s.id, s.status, s.status, nowIso(), user.id, `Replaced with v${version}; waiting for approval`);
-      notify.toAdmin(db, { code: 'N12', samplePk: s.id, subject: `Report ${s.sample_id} waiting for approval`, body: `The white-labelled ${s.test_name} report for ${s.sample_id} passed the check and is waiting for your approval.` });
-    } else if (s.status === 'REPORT_WHITE_LABELLED') {
+      notify.toAdmin(db, { code: 'N12', samplePk: s.id, subject: `Report ${s.sample_id} waiting for approval`, body: `The white-labelled ${s.test_name} report for ${s.sample_id} ${passed} and is waiting for your approval.` });
+    } else if (['REPORT_WHITE_LABELLED', 'REPORT_APPROVED'].includes(s.status)) {
       // A blocked replacement leaves nothing approvable.
       setStatus(db, s, s.route === 'in_house' ? 'RESULT_READY' : 'PARTNER_REPORT_RECEIVED', user, `Replacement v${version} was blocked by the check`);
     }
-    audit(db, user.id, check.ok ? 'branded_report_uploaded' : 'branded_report_blocked', 'sample', s.sample_id, { version, sha256, problems: check.problems });
+    audit(db, user.id, passable ? 'branded_report_uploaded' : 'branded_report_blocked', 'sample', s.sample_id, { version, sha256, problems: check.problems });
     return { id, version, check };
   });
 }
@@ -185,7 +198,7 @@ function report(db, id) {
 }
 
 // Step 3: the admin approves or sends it back.
-function review(db, storage, user, reportId, { approve, note, pagesChecked }) {
+function review(db, storage, user, reportId, { approve, note, pagesChecked, picturesChecked }) {
   requireAdmin(user);
   return db.tx(() => {
     const r = report(db, reportId);
@@ -194,15 +207,16 @@ function review(db, storage, user, reportId, { approve, note, pagesChecked }) {
     if (approve) {
       if (!pagesChecked) throw new UserError('Tick the box to confirm you looked at every page.');
       const check = checkReport(db, storage.get(r.file_key), s);
-      if (!check.ok) throw new UserError(`The check now fails: ${check.problems[0]}`);
+      if (!check.ok && !check.pictureOnly) throw new UserError(`The check now fails: ${check.problems[0]}`);
+      if (check.pictureOnly && !picturesChecked) throw new UserError('This report is pictures only. Tick the second box to confirm you checked the sample ID, the client name and every page for partner names and logos.');
       db.run("UPDATE reports SET status = 'approved', reviewed_by = ?, reviewed_at = ?, review_note = ? WHERE id = ?", user.id, nowIso(), String(note || '').trim() || null, r.id);
-      setStatus(db, s, 'REPORT_APPROVED', user, `Report v${r.version} approved`);
+      setStatus(db, s, 'REPORT_APPROVED', user, `Report v${r.version} approved${check.pictureOnly ? ' after a by-eye check (pictures only)' : ''}`);
     } else {
       if (!String(note || '').trim()) throw new UserError('Say what needs fixing so the lab can correct it.');
       db.run("UPDATE reports SET status = 'rejected', reviewed_by = ?, reviewed_at = ?, review_note = ? WHERE id = ?", user.id, nowIso(), String(note).trim(), r.id);
       setStatus(db, s, s.route === 'in_house' ? 'RESULT_READY' : 'PARTNER_REPORT_RECEIVED', user, `Report v${r.version} sent back: ${String(note).trim()}`);
     }
-    audit(db, user.id, approve ? 'report_approved' : 'report_rejected', 'sample', s.sample_id, { version: r.version, note });
+    audit(db, user.id, approve ? 'report_approved' : 'report_rejected', 'sample', s.sample_id, { version: r.version, note, byEye: approve && Boolean(picturesChecked) });
   });
 }
 
@@ -217,7 +231,8 @@ function release(db, storage, user, reportId) {
     const buf = storage.get(r.file_key);
     if (crypto.createHash('sha256').update(buf).digest('hex') !== r.sha256) throw new UserError('The stored file has changed since it was checked. Upload it again.');
     const check = checkReport(db, buf, s);
-    if (!check.ok) throw new UserError(`Release blocked: ${check.problems[0]}`);
+    // A pictures-only report was approved after the admin's by-eye check.
+    if (!check.ok && !check.pictureOnly) throw new UserError(`Release blocked: ${check.problems[0]}`);
     const now = nowIso();
     const met = s.tat_due_at ? (now <= s.tat_due_at ? 1 : 0) : null;
     db.run("UPDATE reports SET status = 'released', released_by = ?, released_at = ? WHERE id = ?", user.id, now, r.id);
