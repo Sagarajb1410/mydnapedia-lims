@@ -27,7 +27,9 @@ All five modules of the guideline are in. Converting partner reports and draftin
    - **Mac:** right-click `start-lims-mac.command`, choose Open, then Open again.
 4. The LIMS opens in your browser at http://127.0.0.1:3000. Keep the black window open while you use it; close it to stop.
 
-The first start fills the LIMS with dummy accounts, tests and samples. Every demo sign-in uses the password `test1234`:
+**Trying it with your own data:** use `START-LIMS-OWN-DATA-WINDOWS.bat` (Mac: `start-lims-own-data-mac.command`) instead. It starts an empty LIMS kept in a separate `data-own` folder, so the dummy data and your data never mix. The first start shows the admin email and a one-time password (also saved in `data-own/FIRST-SIGN-IN.txt`). Then, as admin, add your settings, tests and prices, franchises and their credit, and a sign-in for each person, before registering samples. Run one LIMS at a time.
+
+The demo start file fills the LIMS with dummy accounts, tests and samples. Every demo sign-in uses the password `test1234`:
 
 | Email | Role |
 | --- | --- |
