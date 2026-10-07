@@ -42,6 +42,10 @@ To start again from fresh dummy data, stop the LIMS and delete the `data` folder
 
 There is no WhatsApp API account, so nothing is sent automatically. Every message goes to the **Outbox**. "Open WhatsApp" opens WhatsApp Web with the message filled in; you press Send and then "Mark sent". With dummy data, only send to your own test numbers.
 
+## Going live
+
+See `deploy/GO-LIVE.md`: an AWS Lightsail server in Mumbai with https, automatic restarts and nightly backups to S3, set up by `deploy/setup-server.sh`. With `LIMS_STAGE=live` the test banners go away, sign-in cookies are https-only and dummy data cannot be added. `npm run backup` makes a backup by hand.
+
 ## Moving to Stage 2 later
 
 Nothing in the code needs rebuilding. Settings come from environment variables (`src/config.js`): `DATA_DIR`, `PORT`, `HOST`, and `STORAGE` (`local` now, `s3` with `S3_BUCKET` once the AWS bucket exists). The database tables use plain SQL so they can move to PostgreSQL.

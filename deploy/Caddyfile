@@ -1,0 +1,12 @@
+{DOMAIN} {
+	encode gzip
+	request_body {
+		max_size 60MB
+	}
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "same-origin"
+	}
+	reverse_proxy 127.0.0.1:3000
+}

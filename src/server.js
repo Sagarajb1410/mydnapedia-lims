@@ -18,6 +18,10 @@ const { createApp } = require('./web/app');
 
 const db = dbm.open(path.join(config.dataDir, 'lims.sqlite'));
 
+if (process.argv.includes('--demo') && config.live) {
+  console.error('\n  Dummy data cannot be added to the live LIMS (LIMS_STAGE=live).\n');
+  process.exit(1);
+}
 if (process.argv.includes('--demo')) {
   if (seed.demo(db, storage.create())) {
     console.log('\nDummy data added. Every demo account uses the password: ' + seed.DEMO_PASSWORD);
@@ -29,11 +33,12 @@ if (process.argv.includes('--demo')) {
     console.log('  counsellor@demo.example   (counsellor)\n');
   }
 } else {
-  const pw = seed.firstRun(db);
+  const adminEmail = process.env.FIRST_ADMIN_EMAIL || 'admin@mydnapedia.example';
+  const pw = seed.firstRun(db, { adminEmail });
   if (pw) {
     const note = path.join(config.dataDir, 'FIRST-SIGN-IN.txt');
-    fs.writeFileSync(note, `First admin sign-in\nEmail: admin@mydnapedia.example\nOne-time password: ${pw}\nChange it after signing in, then delete this file.\n`);
-    console.log(`\nFirst run. Sign in as admin@mydnapedia.example with the one-time password: ${pw}`);
+    fs.writeFileSync(note, `First admin sign-in\nEmail: ${adminEmail}\nOne-time password: ${pw}\nChange it after signing in, then delete this file.\n`, { mode: 0o600 });
+    console.log(`\nFirst run. Sign in as ${adminEmail} with the one-time password: ${pw}`);
     console.log(`(also saved in ${note})\n`);
   }
 }
@@ -68,7 +73,7 @@ server.on('error', (e) => {
   process.exit(1);
 });
 server.listen(config.port, config.host, () => {
-  console.log(`  MyDNAPedia LIMS (test version) is running at ${url}`);
+  console.log(`  MyDNAPedia LIMS${config.live ? '' : ' (test version)'} is running at ${url}`);
   console.log('  Keep this window open while you use it. Press Ctrl+C to stop.');
   if (process.argv.includes('--open')) openBrowser();
 });

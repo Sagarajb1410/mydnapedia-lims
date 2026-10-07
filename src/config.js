@@ -16,6 +16,9 @@ module.exports = {
   },
   // Stage 1 never sends anything: every message goes to the in-app outbox.
   stage: process.env.LIMS_STAGE || 'test',
+  live: process.env.LIMS_STAGE === 'live',
+  // Behind https (the live server), sign-in cookies are sent over https only.
+  secureCookies: process.env.SECURE_COOKIES === '1' || process.env.LIMS_STAGE === 'live',
   timeZone: 'Asia/Kolkata',
   sessionHours: 12,
 };
