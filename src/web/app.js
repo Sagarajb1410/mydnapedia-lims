@@ -99,6 +99,7 @@ ${field('New password again', 'confirm', '', { type: 'password', required: true 
 </div><div class="actions"><button>Save</button></div></form>`);
   }
 
+  require('./pages-bulk')(router, ctxBase, helpers);
   require('./pages-samples')(router, ctxBase, helpers);
   require('./pages-tracking')(router, ctxBase, helpers);
   require('./pages-reports')(router, ctxBase, helpers);

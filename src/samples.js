@@ -246,6 +246,6 @@ function cancel(db, user, sampleId, { reason, refundPaise }) {
 }
 
 module.exports = {
-  STATUSES, BEFORE_LAB, GENDERS, STATES, scope, canRegister, registeringAccount, validatePatient,
+  STATUSES, BEFORE_LAB, GENDERS, STATES, scope, canRegister, registeringAccount, validatePatient, findDuplicate,
   register, load, collect, canEditPatient, editPatient, cancel,
 };
