@@ -1,11 +1,19 @@
 // The web application: sign-in, session handling, and wiring of all pages.
 const http = require('node:http');
+const fs = require('node:fs');
+const path = require('node:path');
 const { Router, parseRequest } = require('./http');
-const { html, page, field } = require('./views');
+const { html, page, field, icon } = require('./views');
 const auth = require('../auth');
 const { UserError } = require('../util');
 
 const COOKIE = 'lims_session';
+
+// Logo, fonts and artwork, read once at start-up.
+const STATIC_TYPES = { '.png': 'image/png', '.svg': 'image/svg+xml', '.ttf': 'font/ttf' };
+const STATIC = new Map(fs.readdirSync(path.join(__dirname, 'static'))
+  .filter((f) => STATIC_TYPES[path.extname(f)])
+  .map((f) => [f, { type: STATIC_TYPES[path.extname(f)], body: fs.readFileSync(path.join(__dirname, 'static', f)) }]));
 
 function createApp({ db, storage }) {
   const router = new Router();
@@ -15,7 +23,7 @@ function createApp({ db, storage }) {
   const helpers = {
     send(ctx, title, body, opts = {}) {
       const flash = ctx.flash;
-      const out = page({ title, user: ctx.user, path: ctx.path, flash, body, bare: opts.bare });
+      const out = page({ title, user: ctx.user, path: ctx.path, query: ctx.query, flash, body, bare: opts.bare });
       ctx.res.writeHead(opts.status || 200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
       ctx.res.end(out.toString());
     },
@@ -32,6 +40,12 @@ function createApp({ db, storage }) {
   };
 
   // Public routes
+  router.get('/static/:file', (ctx) => {
+    const f = STATIC.get(ctx.params.file);
+    if (!f) { ctx.res.writeHead(404); ctx.res.end(); return; }
+    ctx.res.writeHead(200, { 'Content-Type': f.type, 'Cache-Control': 'public, max-age=86400', 'X-Content-Type-Options': 'nosniff' });
+    ctx.res.end(f.body);
+  });
   router.get('/login', (ctx) => loginPage(ctx));
   router.post('/login', (ctx) => {
     try {
@@ -49,12 +63,16 @@ function createApp({ db, storage }) {
   });
 
   function loginPage(ctx, email = '') {
-    helpers.send(ctx, 'Sign in', html`<div class="login card"><h1>Sign in</h1><p class="sub">MyDNAPedia LIMS</p>
-<form method="post" action="/login"><div class="grid" style="grid-template-columns:1fr">
+    const flash = ctx.flash;
+    helpers.send(ctx, 'Sign in', html`<div class="auth"><div class="art"><div class="q"><i></i><b>Every sample, from collection to counselling, in one place.</b><span>Know your DNA · Make better choices</span></div></div>
+<div class="pane"><form method="post" action="/login"><img src="/static/logo-sm.png" alt="MyDNAPedia">
+<h1>Welcome back</h1><p class="sub">Sign in to the MyDNAPedia laboratory system.</p>
+${flash ? html`<div class="flash ${flash.type}">${icon('alert')}<div>${flash.text}</div></div>` : ''}
+<div class="grid">
 ${field('Email', 'email', email, { type: 'email', required: true, attrs: 'autocomplete="username" autofocus' })}
 ${field('Password', 'password', '', { type: 'password', required: true, attrs: 'autocomplete="current-password"' })}
 </div><div class="actions"><button>Sign in</button></div></form>
-<p class="muted" style="font-size:13px;margin-top:16px">Five wrong tries lock the account for ten minutes. Your admin gives you your first password.</p></div>`);
+<p class="foot">Five wrong tries lock the account for ten minutes. Your admin gives you your first password.<br><br><span class="testflag" style="margin:0">Test version · dummy data only</span></p></div></div>`, { bare: true });
   }
 
   router.post('/logout', (ctx) => {
@@ -70,8 +88,8 @@ ${field('Password', 'password', '', { type: 'password', required: true, attrs: '
     helpers.redirect(ctx, '/', { type: 'ok', text: 'Your password has been changed.' });
   });
   function passwordPage(ctx) {
-    helpers.send(ctx, 'Change password', html`<h1>Change password</h1>
-${ctx.user.must_change_password ? html`<p class="sub">Please choose your own password before you continue.</p>` : ''}
+    helpers.send(ctx, 'Change password', html`<div class="head"><div><h1>Change password</h1>
+<p class="sub">${ctx.user.must_change_password ? 'Please choose your own password before you continue.' : 'Use at least 8 characters. You stay signed in on this computer.'}</p></div></div>
 <form method="post" class="card" style="max-width:420px"><div class="grid" style="grid-template-columns:1fr">
 ${field('Current password', 'current', '', { type: 'password', required: true })}
 ${field('New password (at least 8 characters)', 'next', '', { type: 'password', required: true })}
@@ -82,10 +100,12 @@ ${field('New password again', 'confirm', '', { type: 'password', required: true 
   require('./pages-samples')(router, ctxBase, helpers);
   require('./pages-tracking')(router, ctxBase, helpers);
   require('./pages-reports')(router, ctxBase, helpers);
+  require('./pages-counselling')(router, ctxBase, helpers);
   require('./pages-billing')(router, ctxBase, helpers);
   require('./pages-admin')(router, ctxBase, helpers);
 
   const PUBLIC = new Set(['/login']);
+  const isPublic = (p) => PUBLIC.has(p) || p.startsWith('/static/');
 
   async function handle(req, res) {
     const ctx = { ...ctxBase, req, res };
@@ -103,8 +123,8 @@ ${field('New password again', 'confirm', '', { type: 'password', required: true 
         }
       }
       ctx.user = auth.userForToken(db, ctx.cookies[COOKIE]);
-      if (!ctx.user && !PUBLIC.has(ctx.path)) return helpers.redirect(ctx, '/login');
-      if (ctx.user && ctx.user.must_change_password && !['/password', '/logout'].includes(ctx.path)) return helpers.redirect(ctx, '/password');
+      if (!ctx.user && !isPublic(ctx.path)) return helpers.redirect(ctx, '/login');
+      if (ctx.user && ctx.user.must_change_password && !['/password', '/logout'].includes(ctx.path) && !isPublic(ctx.path)) return helpers.redirect(ctx, '/password');
       const m = router.match(req.method, ctx.path);
       if (!m) {
         return helpers.send(ctx, 'Not found', html`<h1>Page not found</h1><p><a href="/">Go to the start page</a></p>`, { status: 404 });

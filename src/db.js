@@ -270,6 +270,53 @@ const MIGRATIONS = [
   ALTER TABLE notifications ADD COLUMN attachment_key TEXT;
   ALTER TABLE notifications ADD COLUMN attachment_name TEXT;
   `,
+  // 4: counselling sessions, the counselling form and the action plan
+  `
+  ALTER TABLE samples ADD COLUMN counsellor_id INTEGER REFERENCES users(id);
+  CREATE TABLE counselling_sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sample_pk INTEGER NOT NULL REFERENCES samples(id),
+    counsellor_id INTEGER NOT NULL REFERENCES users(id),
+    scheduled_at TEXT NOT NULL,
+    mode TEXT NOT NULL,
+    meeting_link TEXT,
+    status TEXT NOT NULL CHECK (status IN ('scheduled','done','no_show','cancelled')),
+    outcome_note TEXT,
+    created_by INTEGER REFERENCES users(id),
+    created_at TEXT NOT NULL,
+    completed_at TEXT
+  );
+  CREATE INDEX counselling_sessions_sample ON counselling_sessions(sample_pk);
+  CREATE TABLE counselling_forms (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sample_pk INTEGER NOT NULL UNIQUE REFERENCES samples(id),
+    data_json TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('draft','complete')),
+    updated_by INTEGER REFERENCES users(id),
+    updated_at TEXT NOT NULL,
+    completed_at TEXT
+  );
+  CREATE TABLE action_plans (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sample_pk INTEGER NOT NULL REFERENCES samples(id),
+    version INTEGER NOT NULL,
+    file_key TEXT NOT NULL,
+    file_name TEXT NOT NULL,
+    file_type TEXT NOT NULL CHECK (file_type IN ('pdf','docx')),
+    sha256 TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    uploaded_by INTEGER REFERENCES users(id),
+    uploaded_at TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('blocked','pending','rejected','approved','delivered','superseded')),
+    check_json TEXT,
+    reviewed_by INTEGER REFERENCES users(id),
+    reviewed_at TEXT,
+    review_note TEXT,
+    delivered_by INTEGER REFERENCES users(id),
+    delivered_at TEXT,
+    UNIQUE (sample_pk, version)
+  );
+  `,
 ];
 
 // Audit rows must never change: block UPDATE and DELETE at database level.

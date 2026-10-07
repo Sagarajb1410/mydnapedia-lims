@@ -1,5 +1,6 @@
 // Module 1: sample registration, collection, labels, bills and the sample page.
-const { html, raw, field, select, statusPill } = require('./views');
+const { html, raw, field, select, statusPill, icon, initials, STATUS_TONE } = require('./views');
+const journey = require('./journey');
 const samples = require('../samples');
 const billing = require('../billing');
 const barcode = require('../barcode');
@@ -19,23 +20,58 @@ module.exports = function (router, { db }, h) {
   router.get('/', (ctx) => {
     const u = ctx.user;
     if (u.role === 'partner') return h.redirect(ctx, '/samples');
-    if (u.role === 'counsellor') {
-      return h.send(ctx, 'Dashboard', html`<h1>Welcome, ${u.name}</h1><div class="card">The counselling module is built after sample tracking and report white-labelling. Your cases will appear here.</div>`);
-    }
-    const counts = db.all('SELECT status, COUNT(*) c FROM samples GROUP BY status');
-    const today = db.get("SELECT COUNT(*) c FROM samples WHERE substr(registered_at, 1, 10) >= ?", new Date(Date.now() - 86400000).toISOString().slice(0, 10)).c;
+    if (u.role === 'counsellor') return h.redirect(ctx, '/counselling');
+    const counts = Object.fromEntries(db.all('SELECT status, COUNT(*) c FROM samples GROUP BY status').map((r) => [r.status, r.c]));
+    const n = (st) => st.reduce((t, k) => t + (counts[k] || 0), 0);
+    const active = n(Object.keys(samples.STATUSES).filter((k) => !['DELIVERED', 'CLOSED', 'CANCELLED'].includes(k)));
+    const lastDay = db.get('SELECT COUNT(*) c FROM samples WHERE registered_at >= ?', new Date(Date.now() - 86400000).toISOString()).c;
     const pendingOutbox = db.get("SELECT COUNT(*) c FROM notifications WHERE status = 'pending'").c;
+    const board = tracking.tatBoard(db);
+    const red = board.filter((r) => !r.tat.paused && r.tat.level === 'red');
+    const amber = board.filter((r) => !r.tat.paused && r.tat.level === 'amber');
+    const watch = [...red, ...amber, ...board.filter((r) => !r.tat.paused && r.tat.level === 'green')].slice(0, 6);
+    const toApprove = db.get("SELECT COUNT(*) c FROM reports WHERE status = 'pending'").c + db.get("SELECT COUNT(*) c FROM action_plans WHERE status = 'pending'").c;
     const low = u.role === 'admin' ? db.all("SELECT * FROM accounts WHERE type = 'partner' AND active = 1").map((a) => ({ ...a, bal: billing.balance(db, a.id) })).filter((a) => a.bal < a.low_balance_paise) : [];
     const pendingRecharges = u.role === 'admin' ? db.get("SELECT COUNT(*) c FROM recharge_requests WHERE status = 'submitted'").c : 0;
-    h.send(ctx, 'Dashboard', html`<h1>Dashboard</h1><p class="sub">${fmtDate(istDate())}</p>
-<div class="stats">
-<div class="stat"><b>${today}</b><span>Registered in the last day</span></div>
-${counts.map((c) => html`<div class="stat"><b>${c.c}</b><span><a href="/samples?status=${c.status}">${samples.STATUSES[c.status]}</a></span></div>`)}
-<div class="stat"><b>${pendingOutbox}</b><span><a href="/outbox">Messages waiting in the outbox</a></span></div>
-${u.role === 'admin' ? html`<div class="stat"><b>${pendingRecharges}</b><span><a href="/billing">Recharge requests to review</a></span></div>` : ''}
+    const total = Math.max(1, journey.PHASES.reduce((t, p) => t + n(p.statuses), 0));
+    const hour = Number(new Intl.DateTimeFormat('en-IN', { hour: 'numeric', hourCycle: 'h23', timeZone: 'Asia/Kolkata' }).format(new Date()));
+    const hello = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+    const exceptions = journey.EXCEPTIONS.filter((k) => counts[k]);
+    const kpi = (href, ic, label, value, note, cls = '') => html`<a class="kpi ${cls}" href="${href}"><span class="k">${icon(ic)}${label}</span><b>${value}</b><small>${note}</small></a>`;
+    h.send(ctx, 'Dashboard', html`<div class="head"><div><h1>${hello}, ${u.name.split(' ')[0]}</h1><p class="sub">${fmtDate(istDate())} · Here is where every sample stands.</p></div>
+<div class="actions" style="margin:0"><a class="btn" href="/samples/new">${icon('plus')}Register a sample</a></div></div>
+<div class="kpis">
+${kpi('/samples', 'samples', 'Active samples', active, `${lastDay} registered in the last 24 hours`)}
+${kpi('/tracking', 'clock', 'Overdue', red.length, red.length ? 'Past their turnaround time' : 'Nothing is late', red.length ? 'alert' : '')}
+${kpi('/tracking', 'alert', 'At risk', amber.length, 'Used 75% of their turnaround', amber.length ? 'attn' : '')}
+${kpi('/reports', 'reports', u.role === 'admin' ? 'To approve' : 'Waiting for approval', toApprove, 'Reports and action plans')}
+${kpi('/outbox', 'outbox', 'Outbox', pendingOutbox, 'Messages waiting to be sent')}
 </div>
-${low.length ? html`<h2>Partners with low credit</h2><div class="table-wrap"><table><tr><th>Partner</th><th class="num">Balance</th><th class="num">Alert level</th></tr>
-${low.map((a) => html`<tr><td><a href="/billing/ledger/${a.id}">${a.name}</a></td><td class="num ${a.bal < 0 ? 'neg' : ''}">${rupees(a.bal)}</td><td class="num">${rupees(a.low_balance_paise)}</td></tr>`)}</table></div>` : ''}`);
+<h2 style="margin-top:0">Sample journey</h2>
+<div class="flow">${journey.PHASES.map((p) => {
+    const c = n(p.statuses);
+    return html`<div class="phase"><div class="t"><i style="background:${p.color}"></i>${p.label}</div><div class="n">${c}</div>
+<ul>${p.statuses.map((k) => html`<li class="${counts[k] ? '' : 'z'}"><a href="/samples?status=${k}" title="${samples.STATUSES[k]}">${journey.SHORT[k] || samples.STATUSES[k]}</a><span>${counts[k] || 0}</span></li>`)}</ul>
+<div class="bar"><i style="width:${Math.round((c / total) * 100)}%;background:${p.color}"></i></div></div>`;
+  })}</div>
+${exceptions.length ? html`<div class="chips" style="margin-top:14px">${exceptions.map((k) => html`<a class="chip ${STATUS_TONE[k]}" href="/samples?status=${k}"><i></i>${samples.STATUSES[k]}<span>${counts[k]}</span></a>`)}</div>` : ''}
+<div class="cols">
+<div class="card"><div class="head" style="margin-bottom:6px"><h2 style="margin:0">Turnaround watch</h2><a href="/tracking" style="font-size:13px;font-weight:600">Open the TAT board</a></div>
+${watch.length ? html`<ul class="list">${watch.map((r) => {
+    const pct = Math.min(100, Math.round(r.tat.used * 100));
+    const col = { red: 'var(--bad)', amber: 'var(--honey2)', green: 'var(--good)' }[r.tat.level];
+    return html`<li><div class="grow"><b><a class="mono" href="/samples/${r.sample_id}">${r.sample_id}</a> · ${r.full_name}</b><span>${r.test_name} · ${samples.STATUSES[r.status]} · due ${fmtDate(r.tat_due_at)}</span></div>
+<div class="meter" title="${pct}% of the turnaround used"><i style="width:${pct}%;background:${col}"></i></div>
+<span class="pill ${{ red: 'bad', amber: 'warn', green: 'good' }[r.tat.level]}">${r.tat.level === 'red' ? `${Math.abs(r.tat.daysLeft).toFixed(1)} d late` : `${r.tat.daysLeft.toFixed(1)} d left`}</span></li>`;
+  })}</ul>` : html`<div class="empty">${icon('check')}No samples are in the lab right now.</div>`}</div>
+<div>
+${u.role === 'admin' ? html`<div class="card"><div class="head" style="margin-bottom:6px"><h2 style="margin:0">Partner credit</h2><a href="/billing" style="font-size:13px;font-weight:600">Billing</a></div>
+${low.length ? html`<ul class="list">${low.map((a) => html`<li><div class="grow"><b><a href="/billing/ledger/${a.id}">${a.name}</a></b><span>Reminder level ${rupees(a.low_balance_paise)}</span></div><b class="num ${a.bal < 0 ? 'neg' : ''}">${rupees(a.bal)}</b></li>`)}</ul>` : html`<div class="empty">${icon('check')}Every partner has enough credit.</div>`}
+${pendingRecharges ? html`<div class="flash warn" style="margin:12px 0 0">${icon('info')}<div><a href="/billing">${pendingRecharges} recharge request${pendingRecharges === 1 ? '' : 's'}</a> waiting for your review.</div></div>` : ''}</div>` : ''}
+<div class="card"><h2>Quick actions</h2><div class="actions" style="margin:0;display:grid;grid-template-columns:1fr 1fr;gap:10px">
+<a class="btn light" href="/tracking/pickups">${icon('tracking')}Pickups</a><a class="btn light" href="/tracking/receive">${icon('samples')}Lab receipt</a>
+<a class="btn light" href="/tracking/onward">${icon('arrow')}Partner dispatch</a><a class="btn light" href="/reports">${icon('reports')}Reports</a></div></div>
+</div></div>`);
   });
 
   // ---------- Sample list ----------
@@ -49,27 +85,52 @@ ${low.map((a) => html`<tr><td><a href="/billing/ledger/${a.id}">${a.name}</a></t
       where.push('(s.sample_id LIKE ? OR p.full_name LIKE ? OR p.mobile LIKE ? OR s.partner_ref LIKE ?)');
       params.push(`%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`);
     }
-    if (ctx.query.status && samples.STATUSES[ctx.query.status]) { where.push('s.status = ?'); params.push(ctx.query.status); }
+    const base = [...where];
+    const baseParams = [...params];
+    const phase = journey.PHASES.find((p) => p.key === ctx.query.phase);
+    const status = samples.STATUSES[ctx.query.status] ? ctx.query.status : '';
+    if (status) { where.push('s.status = ?'); params.push(status); } else if (phase) { where.push(`s.status IN (${phase.statuses.map(() => '?').join(',')})`); params.push(...phase.statuses); }
     if (isStaff(u) && ctx.query.account) { where.push('s.account_id = ?'); params.push(Number(ctx.query.account)); }
     const rows = db.all(
-      `SELECT s.*, p.full_name, p.mobile, t.name AS test_name, a.name AS account_name, a.type AS account_type, b.net_paise, b.status AS bill_status
+      `SELECT s.*, p.full_name, p.mobile, p.gender, p.dob, p.city, t.name AS test_name, a.name AS account_name, a.type AS account_type, b.net_paise, b.status AS bill_status
          FROM samples s JOIN patients p ON p.id = s.patient_id JOIN tests t ON t.id = s.test_id
          JOIN accounts a ON a.id = s.account_id LEFT JOIN bills b ON b.sample_pk = s.id
         WHERE ${where.join(' AND ')} ORDER BY s.id DESC LIMIT 200`, ...params);
+    // A scanned barcode or an exact sample ID opens the sample straight away.
+    if (q && rows.length === 1 && rows[0].sample_id.toUpperCase() === q.toUpperCase()) return h.redirect(ctx, `/samples/${rows[0].sample_id}`);
+    // Counts for the chips follow the search box but not the chip itself.
+    const byStatus = Object.fromEntries(db.all(`SELECT s.status, COUNT(*) c FROM samples s JOIN patients p ON p.id = s.patient_id WHERE ${base.join(' AND ')} GROUP BY s.status`, ...baseParams).map((r) => [r.status, r.c]));
+    const cnt = (st) => st.reduce((t, k) => t + (byStatus[k] || 0), 0);
+    const all = cnt(Object.keys(byStatus));
     const accounts = isStaff(u) ? db.all('SELECT id, name FROM accounts ORDER BY type, name') : [];
-    const used = Object.keys(samples.STATUSES).filter((k) => db.get(`SELECT 1 FROM samples s WHERE s.status = ? AND ${sc.sql} LIMIT 1`, k, ...sc.params));
-    h.send(ctx, 'Samples', html`<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
-<div><h1>${u.role === 'partner' ? 'Your samples' : 'Samples'}</h1><p class="sub">${rows.length} shown${rows.length === 200 ? ' (latest 200)' : ''}</p></div>
-<a class="btn" href="/samples/new">Register a new sample</a></div>
-<form class="filters" method="get"><input name="q" value="${q}" placeholder="Sample ID, name, mobile or reference">
-<select name="status"><option value="">All statuses</option>${used.map((k) => html`<option value="${k}" ${ctx.query.status === k ? raw('selected') : ''}>${samples.STATUSES[k]}</option>`)}</select>
-${isStaff(u) ? html`<select name="account"><option value="">All accounts</option>${accounts.map((a) => html`<option value="${a.id}" ${String(a.id) === ctx.query.account ? raw('selected') : ''}>${a.name}</option>`)}</select>` : ''}
-<button class="light">Filter</button></form>
-<div class="table-wrap"><table><tr><th>Sample ID</th><th>Patient</th><th>Test</th>${isStaff(u) ? html`<th>Registered by</th>` : ''}<th>Status</th><th>Registered</th><th class="num">Billed</th></tr>
-${rows.map((r) => html`<tr><td><a class="mono" href="/samples/${r.sample_id}">${r.sample_id}</a></td><td>${r.full_name}<br><span class="muted">${r.mobile}</span></td><td>${r.test_name}</td>
-${isStaff(u) ? html`<td>${r.account_name}</td>` : ''}<td>${statusPill(r.status, samples.STATUSES[r.status])}</td><td>${fmtDateTime(r.registered_at)}</td>
-<td class="num">${r.net_paise == null ? '' : rupees(r.net_paise)}${r.bill_status === 'reversed' ? html`<br><span class="pill">reversed</span>` : ''}</td></tr>`)}
-${rows.length ? '' : html`<tr><td colspan="7" class="muted">No samples yet.</td></tr>`}</table></div>`);
+    const link = (extra) => {
+      const qs = new URLSearchParams({ ...(q ? { q } : {}), ...(ctx.query.account ? { account: ctx.query.account } : {}), ...extra });
+      return `/samples${qs.toString() ? `?${qs}` : ''}`;
+    };
+    const age = (dob) => {
+      if (!dob) return '';
+      const d = new Date(dob); const now = new Date();
+      let y = now.getFullYear() - d.getFullYear();
+      if (now < new Date(now.getFullYear(), d.getMonth(), d.getDate())) y--;
+      return `${y} y`;
+    };
+    const title = u.role === 'partner' ? 'Your samples' : u.role === 'counsellor' ? 'Clients' : 'Samples';
+    h.send(ctx, title, html`<div class="head"><div><h1>${title}</h1><p class="sub">${q ? html`Results for “${q}” · ` : ''}${rows.length} shown${rows.length === 200 ? ' (latest 200)' : ''}</p></div>
+${samples.canRegister(u) ? html`<a class="btn" href="/samples/new">${icon('plus')}Register a sample</a>` : ''}</div>
+<div class="chips"><a class="chip ${!phase && !status ? 'on' : ''}" href="${link({})}">All<span>${all}</span></a>
+${journey.PHASES.filter((p) => cnt(p.statuses) || phase === p).map((p) => html`<a class="chip ${phase === p && !status ? 'on' : ''}" href="${link({ phase: p.key })}">${p.label}<span>${cnt(p.statuses)}</span></a>`)}
+${journey.EXCEPTIONS.filter((k) => byStatus[k] || status === k).map((k) => html`<a class="chip ${status === k ? 'on' : ''}" href="${link({ status: k })}">${samples.STATUSES[k]}<span>${byStatus[k] || 0}</span></a>`)}
+${status && !journey.EXCEPTIONS.includes(status) ? html`<a class="chip on" href="${link({ status })}">${samples.STATUSES[status]}<span>${byStatus[status] || 0}</span></a>` : ''}</div>
+<form class="filters" method="get">${phase && !status ? html`<input type="hidden" name="phase" value="${phase.key}">` : ''}${status ? html`<input type="hidden" name="status" value="${status}">` : ''}
+<input name="q" value="${q}" placeholder="Sample ID, name, mobile or reference" aria-label="Search">
+${isStaff(u) ? html`<select name="account" aria-label="Registered by"><option value="">All accounts</option>${accounts.map((a) => html`<option value="${a.id}" ${String(a.id) === ctx.query.account ? raw('selected') : ''}>${a.name}</option>`)}</select>` : ''}
+<button class="light">Apply</button>${q || ctx.query.account ? html`<a class="btn light" href="${link({}).replace(/\?.*/, '')}">Clear</a>` : ''}</form>
+<div class="table-wrap"><table class="stack"><thead><tr><th>Sample ID</th><th>${u.role === 'counsellor' ? 'Client' : 'Patient'}</th><th>Test</th>${isStaff(u) ? html`<th>Registered by</th>` : ''}<th>Status</th><th>Registered</th>${u.role === 'counsellor' ? '' : html`<th class="num">Billed</th>`}</tr></thead><tbody>
+${rows.map((r) => html`<tr data-href="/samples/${r.sample_id}"><td><a class="mono" href="/samples/${r.sample_id}">${r.sample_id}</a></td>
+<td><b>${r.full_name}</b><br><span class="muted">${[r.gender, age(r.dob), r.city].filter(Boolean).join(' · ')}</span></td><td>${r.test_name}</td>
+${isStaff(u) ? html`<td>${r.account_name}${r.partner_ref ? html`<br><span class="muted">Ref ${r.partner_ref}</span>` : ''}</td>` : ''}<td>${statusPill(r.status, samples.STATUSES[r.status])}</td><td class="nw">${fmtDate(r.registered_at)}<br><span class="muted">${r.mobile}</span></td>
+${u.role === 'counsellor' ? '' : html`<td class="num">${r.net_paise == null ? '' : rupees(r.net_paise)}${r.bill_status === 'reversed' ? html`<br><span class="pill">reversed</span>` : ''}</td>`}</tr>`)}
+${rows.length ? '' : html`<tr><td colspan="7"><div class="empty">${icon('search')}No samples match.${samples.canRegister(u) && !q ? html` <a href="/samples/new">Register the first one</a>.` : ''}</div></td></tr>`}</tbody></table></div>`);
   });
 
   // ---------- Registration ----------
@@ -166,44 +227,50 @@ ${duplicate ? html`<div class="card">${field('Reason for registering again', 'du
     const events = db.all('SELECT e.*, u.name AS user_name FROM sample_events e LEFT JOIN users u ON u.id = e.user_id WHERE sample_pk = ? ORDER BY e.id', s.id);
     const regBy = db.get('SELECT name FROM users WHERE id = ?', s.registered_by);
     const early = samples.BEFORE_LAB.includes(s.status);
-    const canCancel = s.status !== 'CANCELLED' && (early ? u.role !== 'counsellor' : u.role === 'admin');
-    h.send(ctx, s.sample_id, html`<p class="noprint"><a href="/samples">← Samples</a></p>
-<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
-<div><h1 class="mono">${s.sample_id}</h1><p class="sub">${t.name} · ${statusPill(s.status, samples.STATUSES[s.status])}</p></div>
-<div class="actions" style="margin:0"><a class="btn" href="/samples/${s.sample_id}/label" target="_blank">Print label</a><a class="btn light" href="/samples/${s.sample_id}/bill" target="_blank">Print bill</a>
-${samples.canEditPatient(u, s) && s.status !== 'CANCELLED' ? html`<a class="btn light" href="/samples/${s.sample_id}/edit">Edit patient</a>` : ''}</div></div>
-<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(320px,1fr));align-items:start">
-<div class="card"><h2 style="margin-top:0">Patient</h2><dl class="facts">
+    const canCancel = !['CANCELLED', 'CLOSED', 'DELIVERED'].includes(s.status) && (early ? u.role !== 'counsellor' : u.role === 'admin');
+    const patientCard = html`<div class="card"><h2>${u.role === 'counsellor' ? 'Client' : 'Patient'}</h2><dl class="facts">
 <dt>Name</dt><dd>${p.full_name}</dd><dt>Gender</dt><dd>${p.gender}</dd><dt>Date of birth</dt><dd>${fmtDate(p.dob)}</dd>
 <dt>Mobile</dt><dd>${p.mobile}</dd><dt>Email</dt><dd>${p.email || '—'}</dd><dt>Address</dt><dd>${[p.address, p.city, p.state, p.pincode].filter(Boolean).join(', ')}</dd>
 <dt>Consent</dt><dd>Test: yes · Data use: ${s.consent_data_use ? 'yes' : 'no'} · ${s.consent_method}</dd>
-${s.clinical_notes ? html`<dt>Clinical notes</dt><dd>${s.clinical_notes}</dd>` : ''}</dl></div>
-<div class="card"><h2 style="margin-top:0">Sample</h2><dl class="facts">
+${s.clinical_notes ? html`<dt>Clinical notes</dt><dd>${s.clinical_notes}</dd>` : ''}</dl></div>`;
+    const sampleCard = html`<div class="card"><h2>Sample</h2><dl class="facts">
 <dt>Test</dt><dd>${t.name}</dd><dt>Sample type</dt><dd>${t.sample_type}</dd>
 ${isStaff(u) ? html`<dt>Processing</dt><dd>${ROUTE_LABEL[t.route]} · TAT ${t.tat_days} days from lab receipt</dd>` : ''}
 <dt>Registered by</dt><dd>${a.name} · ${regBy ? regBy.name : ''}</dd><dt>Registered</dt><dd>${fmtDateTime(s.registered_at)}</dd>
 <dt>Collected</dt><dd>${s.collected_at ? html`${fmtDateTime(s.collected_at)} by ${s.collector}` : 'Not yet'}</dd>
 ${s.partner_ref ? html`<dt>Reference</dt><dd>${s.partner_ref}</dd>` : ''}${s.referring_doctor ? html`<dt>Doctor</dt><dd>${s.referring_doctor}</dd>` : ''}
 ${s.duplicate_reason ? html`<dt>Repeat reason</dt><dd>${s.duplicate_reason}</dd>` : ''}${s.cancel_reason ? html`<dt>Cancelled</dt><dd>${s.cancel_reason}</dd>` : ''}</dl>
-${s.status === 'REGISTERED' && u.role !== 'counsellor' ? html`<form method="post" action="/samples/${s.sample_id}/collect" class="noprint" style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px">
-<b>Mark as collected</b><div class="grid" style="margin-top:8px">${field('Collected by', 'collector', '', { required: true })}${field('Date and time', 'collected_at', '', { type: 'datetime-local', required: true })}</div>
-<div class="actions"><button>Mark collected</button></div></form>` : ''}</div>
-<div class="card"><h2 style="margin-top:0">Billing</h2>${bill ? html`<dl class="facts">
+${s.status === 'REGISTERED' && u.role !== 'counsellor' ? html`<form method="post" action="/samples/${s.sample_id}/collect" class="noprint" style="margin-top:16px;border-top:1px solid var(--line);padding-top:14px">
+<b>Mark as collected</b><div class="grid" style="margin-top:10px">${field('Collected by', 'collector', '', { required: true })}${field('Date and time', 'collected_at', '', { type: 'datetime-local', required: true })}</div>
+<div class="actions"><button>Mark collected</button></div></form>` : ''}</div>`;
+    const billingCard = u.role === 'counsellor' ? '' : html`<div class="card"><h2>Billing</h2>${bill ? html`<dl class="facts">
 <dt>Bill number</dt><dd class="mono">${bill.bill_no}</dd>
 <dt>${billing.PRICE_LIST_LABEL[bill.price_list]}</dt><dd>${rupees(bill.list_price_paise)}</dd>
 ${bill.discount_paise ? html`<dt>Discount</dt><dd>${rupees(bill.discount_paise)}</dd>` : ''}
 <dt>${bill.payer === 'credit' ? 'Deducted from credit' : bill.payer === 'supplier' ? 'Charged to supplier' : 'Patient pays'}</dt><dd><b>${rupees(bill.net_paise)}</b> · ${bill.status}</dd>
 ${bill.payment_mode ? html`<dt>Paid by</dt><dd>${bill.payment_mode}${bill.payment_ref ? ` (${bill.payment_ref})` : ''}</dd>` : ''}
 ${sbill ? html`<dt>Patient bill</dt><dd>${sbill.bill_no}: ${rupees(sbill.patient_price_paise)} − ${rupees(sbill.discount_paise)} + GST ${rupees(sbill.gst_paise)} = <b>${rupees(sbill.total_paise)}</b></dd>` : ''}
-</dl>` : html`<p class="muted">No bill.</p>`}</div>
+</dl>` : html`<p class="muted">No bill.</p>`}</div>`;
+    const timelineCard = html`<div class="card"><h2>Timeline</h2><ul class="timeline">${events.map((e) => html`<li><b>${samples.STATUSES[e.to_status]}</b><br><span class="muted">${fmtDateTime(e.at)}${e.user_name ? ` · ${e.user_name}` : ''}</span>${e.note ? html`<br>${e.note}` : ''}</li>`)}</ul></div>`;
+    const cancelCard = canCancel ? html`<details class="card noprint"><summary><b>Cancel this sample</b></summary>
+<form method="post" action="/samples/${s.sample_id}/cancel" style="margin-top:12px"><p class="muted">${early ? (bill && bill.payer === 'credit' ? `The full ${rupees(bill.net_paise)} goes back to the partner's credit.` : 'The bill is reversed.') : 'The lab has already received this sample. Choose how much to give back.'}</p>
+<div class="grid">${field('Reason', 'reason', '', { required: true })}${early ? '' : field('Amount to give back (₹)', 'refund', bill ? (bill.net_paise / 100).toFixed(2) : '0')}</div>
+<div class="actions"><button class="danger">Cancel sample</button></div></form></details>` : '';
+    const steps = journey.steps(s, t.route);
+    h.send(ctx, s.sample_id, html`<a class="crumb noprint" href="/samples">${icon('back')}${u.role === 'counsellor' ? 'Clients' : 'Samples'}</a>
+<div class="hero"><div class="who2"><div class="avatar">${initials(p.full_name)}</div><div style="min-width:0"><h1>${p.full_name}</h1>
+<div class="meta"><b class="mono" style="color:var(--ink)">${s.sample_id}</b><span>${t.name}</span>${statusPill(s.status, samples.STATUSES[s.status])}${isStaff(u) ? html`<span>${a.name}</span>` : ''}</div></div></div>
+<div class="actions noprint" style="margin:0"><a class="btn light" href="/samples/${s.sample_id}/label" target="_blank">${icon('print')}Label</a>${u.role === 'counsellor' ? '' : html`<a class="btn light" href="/samples/${s.sample_id}/bill" target="_blank">${icon('print')}Bill</a>`}
+${samples.canEditPatient(u, s) && s.status !== 'CANCELLED' ? html`<a class="btn light" href="/samples/${s.sample_id}/edit">Edit patient</a>` : ''}</div></div>
+${s.status === 'CANCELLED' ? '' : html`<div class="steps" aria-label="Progress">${steps.map((st, i) => html`<div class="step ${st.state} ${i === 0 ? 'first' : ''}">${st.label}</div>`)}</div>`}
+<div class="detail"><div>
+${sampleCard}
 ${isStaff(u) ? trackingCard(s, t) : ''}
 ${isStaff(u) ? h.reportCard(u, s, t) : ''}
-<div class="card"><h2 style="margin-top:0">Timeline</h2><ul class="timeline">${events.map((e) => html`<li><b>${samples.STATUSES[e.to_status]}</b><br><span class="muted">${fmtDateTime(e.at)}${e.user_name ? ` · ${e.user_name}` : ''}</span>${e.note ? html`<br>${e.note}` : ''}</li>`)}</ul></div>
-</div>
-${canCancel ? html`<details class="card noprint"><summary><b>Cancel this sample</b></summary>
-<form method="post" action="/samples/${s.sample_id}/cancel" style="margin-top:10px"><p class="muted">${early ? (bill && bill.payer === 'credit' ? `The full ${rupees(bill.net_paise)} goes back to the partner's credit.` : 'The bill is reversed.') : 'The lab has already received this sample. Choose how much to give back.'}</p>
-<div class="grid">${field('Reason', 'reason', '', { required: true })}${early ? '' : field('Amount to give back (₹)', 'refund', bill ? (bill.net_paise / 100).toFixed(2) : '0')}</div>
-<div class="actions"><button class="danger">Cancel sample</button></div></form></details>` : ''}`);
+${h.counsellingCard(u, s, t)}
+</div><div>
+${patientCard}${billingCard}${timelineCard}${cancelCard}
+</div></div>`);
   });
 
   // Tracking facts and the next lab action for staff.
@@ -216,7 +283,8 @@ ${canCancel ? html`<details class="card noprint"><summary><b>Cancel this sample<
     return html`<div class="card"><h2 style="margin-top:0">Tracking</h2><dl class="facts">
 ${ship.map((x) => html`<dt>${x.leg === 1 ? 'Pickup' : 'Onward dispatch'}</dt><dd><a class="mono" href="/tracking/shipments/${x.id}">${x.shipment_no}</a> · ${x.status.replace('_', ' ')}</dd>`)}
 ${s.received_at ? html`<dt>Lab receipt</dt><dd>${fmtDateTime(s.received_at)} · ${s.receipt_condition}</dd>` : ''}
-${s.tat_due_at ? html`<dt>TAT due</dt><dd>${fmtDate(s.tat_due_at)} · <span class="pill ${tat.paused ? '' : { green: 'good', amber: 'warn', red: 'bad' }[tat.level]}">${tat.paused ? 'paused' : tat.level === 'red' ? 'overdue' : `${tat.daysLeft.toFixed(1)} days left`}</span></dd>` : ''}
+${s.tat_due_at && s.released_at ? html`<dt>TAT due</dt><dd>${fmtDate(s.tat_due_at)} · <span class="pill ${s.tat_met ? 'good' : 'bad'}">${s.tat_met ? 'report released within TAT' : 'report released late'}</span></dd>` : ''}
+${s.tat_due_at && !s.released_at ? html`<dt>TAT due</dt><dd>${fmtDate(s.tat_due_at)} · <span class="pill ${tat.paused ? '' : { green: 'good', amber: 'warn', red: 'bad' }[tat.level]}">${tat.paused ? 'paused' : tat.level === 'red' ? 'overdue' : `${tat.daysLeft.toFixed(1)} days left`}</span></dd>` : ''}
 ${s.partner_received_at ? html`<dt>Partner lab receipt</dt><dd>${fmtDate(s.partner_received_at)}${s.partner_lab_ref ? ` · ref ${s.partner_lab_ref}` : ''}</dd>` : ''}
 ${s.reject_reason ? html`<dt>Rejected</dt><dd>${s.reject_reason}</dd>` : ''}
 ${s.hold_reason ? html`<dt>On hold</dt><dd>${s.hold_reason} (since ${fmtDateTime(s.hold_started_at)})</dd>` : ''}
@@ -287,6 +355,7 @@ ${Array.from({ length: copies }, () => label)}<script>setTimeout(()=>print(),300
 
   // ---------- Bill ----------
   router.get('/samples/:id/bill', (ctx) => {
+    if (ctx.user.role === 'counsellor') throw new UserError('Bills are not available to counsellors.');
     const { s, p, t, a, bill, sbill } = loadFull(ctx);
     if (!bill) throw new UserError('This sample has no bill.');
     let head;

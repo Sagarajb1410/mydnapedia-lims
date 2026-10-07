@@ -7,6 +7,7 @@ const billing = require('./billing');
 const tracking = require('./tracking');
 const samples = require('./samples');
 const reports = require('./reports');
+const counselling = require('./counselling');
 const pdfwrite = require('./pdfwrite');
 
 const TESTS = [
@@ -143,17 +144,41 @@ function demo(db, store = null) {
       const foot = leak ? ['', 'Analysed by Acme Genomics Labs, Bengaluru'] : ['', 'Know Your DNA - Make Better Choices - Live Healthier', 'A Unit of TVASTI Health and Wellness Private Limited'];
       return { filename: branded ? `${s.sample_id}.pdf` : 'partner-report.pdf', type: 'application/pdf', data: pdfwrite.write([[...head, ...body], foot], { title: t.name, author: branded ? 'MyDNAPedia' : 'Acme Genomics' }) };
     };
+    const releaseFull = (x) => {
+      const l1 = tracking.scheduleLeg1(db, root, { samplePks: [x.id], pickupDate: day, window: win });
+      tracking.markPickedUp(db, lab, l1.shipmentId);
+      tracking.receive(db, lab, x.sample_id, { condition: 'Acceptable' });
+      const l2 = tracking.scheduleLeg2(db, lab, { samplePks: [x.id], pickupDate: day, window: win });
+      tracking.markPickedUp(db, lab, l2.shipmentId);
+      tracking.partnerReceived(db, lab, x.sample_id, { receivedOn: day, ref: `PL-DEMO-${x.id}50` });
+      reports.uploadSource(db, store, lab, x.sample_id, pdf(x, false));
+      const done = reports.uploadBranded(db, store, lab, x.sample_id, pdf(x, true));
+      reports.review(db, store, root, done.id, { approve: true, pagesChecked: true });
+      reports.release(db, store, root, done.id);
+    };
     const c6 = reg(careUser, 2, { collected_now: 'yes', collector: 'Nurse Leela' });
-    const leg1b = tracking.scheduleLeg1(db, root, { samplePks: [c6.id], pickupDate: day, window: win });
-    tracking.markPickedUp(db, lab, leg1b.shipmentId);
-    tracking.receive(db, lab, c6.sample_id, { condition: 'Acceptable' });
-    const leg2b = tracking.scheduleLeg2(db, lab, { samplePks: [c6.id], pickupDate: day, window: win });
-    tracking.markPickedUp(db, lab, leg2b.shipmentId);
-    tracking.partnerReceived(db, lab, c6.sample_id, { receivedOn: day, ref: 'PL-DEMO-0050' });
-    reports.uploadSource(db, store, lab, c6.sample_id, pdf(c6, false));
-    const done = reports.uploadBranded(db, store, lab, c6.sample_id, pdf(c6, true));
-    reports.review(db, store, root, done.id, { approve: true, pagesChecked: true });
-    reports.release(db, store, root, done.id);
+    const c7 = reg(careUser, 0, { collected_now: 'yes', collector: 'Nurse Leela' });
+    const c8 = reg(careUser, 1, { collected_now: 'yes', collector: 'Nurse Leela' });
+    for (const x of [c6, c7, c8]) releaseFull(x);
+
+    // Counselling: c7 booked for tomorrow; c8 taken all the way to a delivered action plan.
+    const counsellor = db.get("SELECT u.*, NULL AS account_type FROM users u WHERE email = 'counsellor@demo.example'");
+    const tomorrow = (h) => { const d = new Date(Date.now() + 86400000 + 5.5 * 3600000); return `${d.toISOString().slice(0, 10)}T${h}`; };
+    counselling.schedule(db, counsellor, c7.sample_id, { when: tomorrow('11:00'), mode: 'Video call', link: 'https://meet.google.com/demo-link-abc' });
+    counselling.schedule(db, counsellor, c8.sample_id, { when: tomorrow('15:30'), mode: 'Phone call' });
+    counselling.sessionOutcome(db, counsellor, c8.sample_id, { outcome: 'done' });
+    counselling.saveForm(db, counsellor, c8.sample_id, {
+      heightCm: '168', weightKg: '74', waist: '88', bp: '128/82', hr: '74', 'life.diet': 'Vegetarian', 'life.actType': 'Walking', 'life.actFreq': '3-4',
+      'life.sleepHours': '6-7', 'life.tobacco': 'Never', 'life.alcohol': 'Occasional', 'life.caffeine': '3-4', 'life.stress': 'Moderate',
+      conditions: ['cholesterol'], family: ['heart', 'diabetes'], familyNote: 'Father: heart attack at 60 (dummy)',
+      priorities: 'Lower LDL cholesterol\nWalk 5 days a week\nVitamin D test', healthChecks: 'Lipid profile in 3 months', consults: ['physician'],
+    }, { complete: true });
+    const p8 = db.get('SELECT full_name FROM patients WHERE id = ?', c8.patient_id).full_name;
+    const planPdf = pdfwrite.write([[{ text: 'MyDNAPedia Personalised Action Plan', size: 16, bold: true }, `${p8}    Sample ID ${c8.sample_id}`, '',
+      'Top priorities: lower LDL cholesterol, walk 5 days a week, check vitamin D.', 'Dummy action plan for the test version.']], { title: 'Action plan', author: 'MyDNAPedia' });
+    const ap = counselling.uploadPlan(db, store, counsellor, c8.sample_id, { filename: 'plan.pdf', type: 'application/pdf', data: planPdf });
+    counselling.reviewPlan(db, store, root, ap.id, { approve: true, pagesChecked: true });
+    counselling.deliver(db, store, counsellor, ap.id);
 
     reports.uploadSource(db, store, lab, c5.sample_id, pdf(c5, false));
     reports.uploadBranded(db, store, lab, c5.sample_id, pdf(c5, true, true));

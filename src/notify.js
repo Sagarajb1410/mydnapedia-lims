@@ -17,6 +17,9 @@ const CODES = {
   N11: 'TAT warning',
   N12: 'Report waiting for approval',
   N13: 'Report ready',
+  N14: 'Counselling session booked',
+  N15: 'Action plan waiting for approval',
+  N17: 'Action plan sent',
   N16: 'Cancellation and credit reversal',
 };
 

@@ -47,8 +47,14 @@ const STATES = [
 
 // Which samples a user may see. Partner and supplier users see only their own
 // account's samples; this filter is applied to every query that lists or opens one.
+const COUNSELLING_STAGES = ['REPORT_RELEASED', 'COUNSELLING_SCHEDULED', 'COUNSELLING_DONE', 'ACTION_PLAN_DRAFTED', 'ACTION_PLAN_APPROVED', 'DELIVERED', 'CLOSED'];
+
 function scope(user) {
   if (user.role === 'partner') return { sql: 's.account_id = ?', params: [user.account_id] };
+  // Counsellors see clients from report release onwards, unassigned or their own.
+  if (user.role === 'counsellor') {
+    return { sql: `s.status IN (${COUNSELLING_STAGES.map(() => '?').join(',')}) AND (s.counsellor_id IS NULL OR s.counsellor_id = ?)`, params: [...COUNSELLING_STAGES, user.id] };
+  }
   return { sql: '1 = 1', params: [] };
 }
 
