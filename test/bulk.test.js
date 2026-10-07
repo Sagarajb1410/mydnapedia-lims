@@ -53,6 +53,15 @@ test('a franchise checks, then registers the good rows with credit billing', () 
   assert.equal(out.skipped, 2);
   const statuses = out.sampleIds.map((id) => db.get('SELECT status FROM samples WHERE sample_id = ?', id).status);
   assert.deepEqual(statuses, ['REGISTERED', 'COLLECTED']);
+  const late = bulk.check(db, sun, filled(db, sun, [
+    row({ full_name: 'Late One', mobile: '9822055555', collected_by: 'Raj', collected_on: new Date(Date.now() - 2 * 86400000).toISOString().slice(0, 10) }),
+    row({ full_name: 'Late Two', mobile: '9822066666', collected_by: 'Raj', collected_on: '01/01/2020' }),
+  ]));
+  assert.equal(late[0].errors.length, 0);
+  assert.match(late[1].errors.join(' '), /30 days/);
+  const [lateId] = bulk.confirm(db, sun, bulk.hold(sun, late)).sampleIds;
+  const lateRow = db.get('SELECT collected_at FROM samples WHERE sample_id = ?', lateId);
+  assert.ok(Date.now() - new Date(lateRow.collected_at) > 86400000);
   assert.ok(billing.balance(db, sun.account_id) < before);
   assert.throws(() => bulk.confirm(db, sun, token), /expired/);
   // The same rows again are now repeats.

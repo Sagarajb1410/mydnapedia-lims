@@ -19,7 +19,7 @@ function columns(user) {
     ['full_name', 'Patient full name', true], ['gender', 'Gender (Male/Female/Other)', true], ['dob', 'Date of birth (DD/MM/YYYY)', true],
     ['mobile', 'Mobile', true], ['email', 'Email', false], ['address', 'Address', false], ['city', 'City', true], ['state', 'State', true],
     ['pincode', 'Pincode', true], ['test', 'Test', true], ['consent', 'Consent (Signed form/Verbal)', true], ['data_use', 'Data use for research (Yes/No)', false],
-    ['collected_by', 'Collected by (leave empty if not collected yet)', false], ['partner_ref', 'Your reference', false], ['doctor', 'Referring doctor', false],
+    ['collected_by', 'Collected by (leave empty if not collected yet)', false], ['collected_on', 'Collected on (DD/MM/YYYY, empty = today)', false], ['partner_ref', 'Your reference', false], ['doctor', 'Referring doctor', false],
     ...(supplier ? [['patient_price', 'Your price to patient (Rs)', true], ['patient_discount', 'Your discount (Rs)', false], ['gst', 'GST % on your bill (0/5/12/18)', true]] : []),
     ...(direct ? [['payment', 'Payment (Cash/UPI/Card/Bank transfer/Pending)', true], ['payment_ref', 'Payment reference', false]] : []),
     ['repeat_reason', 'Repeat reason (only if the same test was done in the last 90 days)', false],
@@ -99,9 +99,17 @@ function check(db, user, file) {
       full_name: v('full_name'), gender: gender || v('gender'), dob: parseDob(v('dob')), mobile: v('mobile'), email: v('email'), address: v('address'),
       city: v('city'), state: state || v('state'), pincode: v('pincode').replace(/\.0+$/, ''), test_id: test ? String(test.id) : '',
       consent_testing: 'yes', consent_method: consent, consent_data_use: /^y/i.test(v('data_use')) ? 'yes' : 'no',
-      collected_now: v('collected_by') ? 'yes' : '', collector: v('collected_by'),
+      collected_now: v('collected_by') ? 'yes' : '', collector: v('collected_by'), collected_at: collectedOn(v('collected_on')),
       partner_ref: v('partner_ref'), referring_doctor: v('doctor'), duplicate_reason: v('repeat_reason'),
     };
+    if (v('collected_on') && !v('collected_by')) errors.push('Enter who collected the sample, or leave "Collected on" empty.');
+    if (input.collected_at === 'bad') errors.push('Write the collection date as DD/MM/YYYY.');
+    else if (input.collected_at) {
+      const day = input.collected_at.slice(0, 10);
+      const earliest = new Date(Date.now() - 30 * 86400000 + 330 * 60000).toISOString().slice(0, 10);
+      if (day > istDate()) errors.push('The collection date is in the future.');
+      else if (day < earliest) errors.push('The collection date is more than 30 days ago.');
+    }
     let patient;
     try { patient = samples.validatePatient(input); } catch (e) { errors.push(e.message); }
     if (!test) errors.push(v('test') ? `Unknown test "${v('test')}".` : 'Enter the test.');
@@ -128,6 +136,15 @@ function check(db, user, file) {
     }
     return { line, input, errors, label: { name: input.full_name, test: test ? test.name : v('test'), mobile: v('mobile') } };
   });
+}
+
+// A collection day from the sheet, as noon India time that day (the time is
+// rarely known; noon keeps the day right). Today means now.
+function collectedOn(v) {
+  if (!v) return '';
+  const day = parseDob(v);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return 'bad';
+  return day === istDate() ? '' : `${day}T12:00`;
 }
 
 function csvLine(line) {

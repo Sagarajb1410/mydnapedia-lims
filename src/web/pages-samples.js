@@ -12,6 +12,8 @@ const { fmtDateTime, fmtDate, rupees, toPaise, UserError, getSetting, istDate } 
 const PAY_MODES = ['Cash', 'UPI', 'Card', 'Bank transfer', ['pending', 'Payment pending']];
 const GST_RATES = [['0', '0%'], ['500', '5%'], ['1200', '12%'], ['1800', '18%']];
 const ROUTE_LABEL = { in_house: 'In-house', partner_lab: 'Partner lab' };
+// The end of today in India, so the date picker greys out future days.
+const maxLocal = () => `${istDate()}T23:59`;
 
 function isStaff(user) {
   return user.role === 'admin' || user.role === 'lab';
@@ -183,9 +185,9 @@ ${u.role === 'admin' ? field('Discount (₹)', 'discount', v('discount', '0'), {
 <label class="check"><input type="checkbox" name="consent_data_use" value="yes" ${v('consent_data_use') === 'yes' ? raw('checked') : ''}> The patient also agrees that their anonymised data may be used to improve our services. <span class="muted">(optional)</span></label>
 <div class="grid" style="margin-top:8px">${select('How was consent taken?', 'consent_method', ['Signed form', 'Confirmed verbally by patient'], v('consent_method'), { required: true })}</div></div>
 <div class="card"><h2 style="margin-top:0">Collection</h2>
-<label class="check"><input type="checkbox" name="collected_now" value="yes" ${v('collected_now') === 'yes' ? raw('checked') : ''}> The sample is being collected and labelled now.</label>
-<div class="grid">${field('Collected by', 'collector', v('collector'), { opt: true })}</div>
-<p class="muted" style="margin-bottom:0">If the sample is collected later, leave this unticked and mark it collected from the sample's page.</p></div>
+<label class="check"><input type="checkbox" name="collected_now" value="yes" ${v('collected_now') === 'yes' ? raw('checked') : ''}> The sample is already collected (now or earlier).</label>
+<div class="grid">${field('Collected by', 'collector', v('collector'), { opt: true })}${field('Collection date and time', 'collected_at', v('collected_at'), { type: 'datetime-local', opt: true, attrs: `max="${maxLocal()}"` })}</div>
+<p class="muted" style="margin-bottom:0">Leave the date empty if it is being collected now. Registering late? Enter the real collection date, up to 30 days back. If the sample is collected later, leave this unticked and mark it collected from the sample's page.</p></div>
 ${duplicate ? html`<div class="card">${field('Reason for registering again', 'duplicate_reason', v('duplicate_reason'), { required: true })}</div>` : ''}
 <div class="actions"><button>Save registration</button><a href="/samples">Cancel</a></div></form>`);
   }
@@ -253,7 +255,7 @@ ${isStaff(u) ? html`<dt>Processing</dt><dd>${ROUTE_LABEL[t.route]} · TAT ${t.ta
 ${s.partner_ref ? html`<dt>Reference</dt><dd>${s.partner_ref}</dd>` : ''}${s.referring_doctor ? html`<dt>Doctor</dt><dd>${s.referring_doctor}</dd>` : ''}
 ${s.duplicate_reason ? html`<dt>Repeat reason</dt><dd>${s.duplicate_reason}</dd>` : ''}${s.cancel_reason ? html`<dt>Cancelled</dt><dd>${s.cancel_reason}</dd>` : ''}</dl>
 ${s.status === 'REGISTERED' && u.role !== 'counsellor' ? html`<form method="post" action="/samples/${s.sample_id}/collect" class="noprint" style="margin-top:16px;border-top:1px solid var(--line);padding-top:14px">
-<b>Mark as collected</b><div class="grid" style="margin-top:10px">${field('Collected by', 'collector', '', { required: true })}${field('Date and time', 'collected_at', '', { type: 'datetime-local', required: true })}</div>
+<b>Mark as collected</b><div class="grid" style="margin-top:10px">${field('Collected by', 'collector', '', { required: true })}${field('Date and time', 'collected_at', '', { type: 'datetime-local', required: true, attrs: `max="${maxLocal()}"` })}</div>
 <div class="actions"><button>Mark collected</button></div></form>` : ''}</div>`;
     const billingCard = u.role === 'counsellor' ? '' : html`<div class="card"><h2>Billing</h2>${bill ? html`<dl class="facts">
 <dt>Bill number</dt><dd class="mono">${bill.bill_no}</dd>

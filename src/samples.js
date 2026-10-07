@@ -1,5 +1,5 @@
 // Sample registration, collection, cancellation and the status timeline.
-const { nowIso, istDate, audit, nextCounter, UserError, getSetting } = require('./util');
+const { nowIso, istDate, audit, nextCounter, UserError, getSetting, fmtDateTime } = require('./util');
 const billing = require('./billing');
 const notify = require('./notify');
 const track = require('./track');
@@ -143,6 +143,8 @@ function register(db, user, input) {
   const collectedNow = input.collected_now === 'yes';
   const collector = clean(input.collector);
   if (collectedNow && !collector) throw new UserError('Enter who collected the sample.');
+  // A sample collected earlier and registered late keeps its real collection time.
+  const collectedAt = clean(input.collected_at);
 
   return db.tx(() => {
     const now = nowIso();
@@ -170,7 +172,7 @@ function register(db, user, input) {
       direct: input.direct,
     });
 
-    if (collectedNow) collect(db, user, sample.sample_id, { collector, collectedAt: now });
+    if (collectedNow) collect(db, user, sample.sample_id, { collector, collectedAt: collectedAt || now });
 
     const lab = getSetting(db, 'labName');
     const msg = `${lab}: Dear ${patient.full_name}, your ${test.name} test has been registered. Your sample ID is ${sampleId}. Track your sample any time at ${track.link(sampleId)} using this ID and the last 4 digits of your mobile. For help contact ${getSetting(db, 'supportPhone')}.`;
@@ -189,6 +191,9 @@ function load(db, user, sampleId) {
   return s;
 }
 
+const LATE_DAYS = 30;
+const fmtWhen = (d) => fmtDateTime(d.toISOString());
+
 function collect(db, user, sampleId, { collector, collectedAt }) {
   return db.tx(() => {
     const s = load(db, user, sampleId);
@@ -198,8 +203,10 @@ function collect(db, user, sampleId, { collector, collectedAt }) {
     const raw = collectedAt || nowIso();
     const when = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(raw) ? new Date(raw + ':00+05:30') : new Date(raw);
     if (Number.isNaN(when.getTime())) throw new UserError('Enter the collection date and time.');
-    if (when > new Date(Date.now() + 5 * 60000)) throw new UserError('Collection time cannot be in the future.');
-    if (when < new Date(new Date(s.registered_at).getTime() - 60000)) throw new UserError('Collection cannot be before registration.');
+    if (when > new Date(Date.now() + 5 * 60000)) throw new UserError(`The collection time you entered (${fmtWhen(when)}) is later than now. Please check the date and AM/PM.`);
+    // Late registration is allowed: the sample may have been collected up to
+    // LATE_DAYS before it was entered in the LIMS.
+    if (when < new Date(new Date(s.registered_at).getTime() - LATE_DAYS * 86400000)) throw new UserError(`The collection date (${fmtWhen(when)}) is more than ${LATE_DAYS} days before registration. Please check it.`);
     db.run("UPDATE samples SET status = 'COLLECTED', collected_at = ?, collector = ? WHERE id = ?", when.toISOString(), clean(collector), s.id);
     addEvent(db, s.id, s.status, 'COLLECTED', user.id, `Collected by ${clean(collector)}`);
     audit(db, user.id, 'sample_collected', 'sample', s.sample_id, { collector });

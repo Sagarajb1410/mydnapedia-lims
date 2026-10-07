@@ -145,3 +145,17 @@ test('the partner lab is never named in stored messages', () => {
   const rows = db.all('SELECT body, subject FROM notifications');
   for (const r of rows) assert.doesNotMatch(`${r.subject} ${r.body}`, /MMG/i);
 });
+
+test('a sample registered late keeps its real collection date', () => {
+  const { db, user } = fresh();
+  const sun = user('sunrise@demo.example');
+  const t = String(db.get("SELECT id FROM tests WHERE code = 'MDPSKIN'").id);
+  const local = (days) => new Date(Date.now() - days * 86400000 + 330 * 60000).toISOString().slice(0, 16);
+  const { sample } = samples.register(db, sun, { ...patient({ mobile: '9876500088' }), test_id: t, collected_now: 'yes', collector: 'Raj', collected_at: local(3) });
+  const row = db.get('SELECT status, collected_at, registered_at FROM samples WHERE id = ?', sample.id);
+  assert.equal(row.status, 'COLLECTED');
+  assert.ok(new Date(row.registered_at) - new Date(row.collected_at) > 2.9 * 86400000);
+  const s2 = samples.register(db, sun, { ...patient({ mobile: '9876500089' }), test_id: t }).sample;
+  assert.throws(() => samples.collect(db, sun, s2.sample_id, { collector: 'Raj', collectedAt: local(40) }), /more than 30 days/);
+  assert.throws(() => samples.collect(db, sun, s2.sample_id, { collector: 'Raj', collectedAt: local(-1) }), /later than now.*AM\/PM/);
+});
