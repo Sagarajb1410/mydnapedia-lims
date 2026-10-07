@@ -22,7 +22,7 @@ function tatPill(t) {
 
 function tabs(path) {
   const items = [['/tracking', 'TAT board'], ['/tracking/pickups', 'Pickups'], ['/tracking/receive', 'Lab receipt'], ['/tracking/onward', 'Partner lab dispatch']];
-  return html`<div class="filters noprint">${items.map(([href, label]) => html`<a class="btn ${href === path ? '' : 'light'} small" href="${href}">${label}</a>`)}</div>`;
+  return html`<nav class="seg noprint" aria-label="Tracking">${items.map(([href, label]) => html`<a class="${href === path ? 'on' : ''}" href="${href}">${label}</a>`)}</nav>`;
 }
 
 function pickupFields(withAwb = true) {
