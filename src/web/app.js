@@ -8,6 +8,8 @@ const auth = require('../auth');
 const { UserError } = require('../util');
 
 const COOKIE = 'lims_session';
+const config = require('../config');
+const SECURE = config.secureCookies ? '; Secure' : '';
 
 // Logo, fonts and artwork, read once at start-up.
 const STATIC_TYPES = { '.png': 'image/png', '.svg': 'image/svg+xml', '.ttf': 'font/ttf' };
@@ -29,7 +31,7 @@ function createApp({ db, storage }) {
     },
     redirect(ctx, to, flash) {
       const headers = { Location: to };
-      if (flash) headers['Set-Cookie'] = `lims_flash=${encodeURIComponent(JSON.stringify(flash))}; Path=/; HttpOnly; SameSite=Lax`;
+      if (flash) headers['Set-Cookie'] = `lims_flash=${encodeURIComponent(JSON.stringify(flash))}; Path=/; HttpOnly; SameSite=Lax${SECURE}`;
       ctx.res.writeHead(303, headers);
       ctx.res.end();
     },
@@ -52,7 +54,7 @@ function createApp({ db, storage }) {
       const { token, user } = auth.login(db, ctx.body.email || '', ctx.body.password || '');
       ctx.res.writeHead(303, {
         Location: user.must_change_password ? '/password' : '/',
-        'Set-Cookie': `${COOKIE}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${12 * 3600}`,
+        'Set-Cookie': `${COOKIE}=${token}; Path=/; HttpOnly; SameSite=Lax${SECURE}; Max-Age=${12 * 3600}`,
       });
       ctx.res.end();
     } catch (e) {
@@ -72,12 +74,12 @@ ${flash ? html`<div class="flash ${flash.type}">${icon('alert')}<div>${flash.tex
 ${field('Email', 'email', email, { type: 'email', required: true, attrs: 'autocomplete="username" autofocus' })}
 ${field('Password', 'password', '', { type: 'password', required: true, attrs: 'autocomplete="current-password"' })}
 </div><div class="actions"><button>Sign in</button></div></form>
-<p class="foot">Five wrong tries lock the account for ten minutes. Your admin gives you your first password.<br><br><span class="testflag" style="margin:0">Test version · dummy data only</span></p></div></div>`, { bare: true });
+<p class="foot">Five wrong tries lock the account for ten minutes. Your admin gives you your first password.${config.live ? '' : html`<br><br><span class="testflag" style="margin:0">Test version · dummy data only</span>`}</p></div></div>`, { bare: true });
   }
 
   router.post('/logout', (ctx) => {
     auth.logout(db, ctx.cookies[COOKIE]);
-    ctx.res.writeHead(303, { Location: '/login', 'Set-Cookie': `${COOKIE}=; Path=/; HttpOnly; Max-Age=0` });
+    ctx.res.writeHead(303, { Location: '/login', 'Set-Cookie': `${COOKIE}=; Path=/; HttpOnly${SECURE}; Max-Age=0` });
     ctx.res.end();
   });
 

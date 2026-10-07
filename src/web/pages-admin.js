@@ -210,7 +210,7 @@ ${rows.map((r) => html`<tr><td>${fmtDateTime(r.at)}</td><td>${r.user_name || ''}
       `SELECT n.*, s.sample_id, u.name AS sent_by_name FROM notifications n LEFT JOIN samples s ON s.id = n.sample_pk LEFT JOIN users u ON u.id = n.sent_by
         WHERE ${show === 'pending' ? "n.status = 'pending'" : "n.status != 'pending'"} ORDER BY n.id DESC LIMIT 200`);
     h.send(ctx, 'Outbox', html`<h1>Outbox</h1>
-<p class="sub">In this test version nothing is sent automatically. Open a message to see it ready in WhatsApp or your mail app, send it, then mark it sent. Only send to your own test numbers while using dummy data.</p>
+<p class="sub">Nothing is sent automatically. Open a message to see it ready in WhatsApp or your mail app, send it, then mark it sent. Only send to your own test numbers while using dummy data.</p>
 <nav class="seg"><a class="${show === 'pending' ? 'on' : ''}" href="/outbox">Waiting</a><a class="${show === 'done' ? 'on' : ''}" href="/outbox?show=done">Sent or skipped</a></nav>
 <div class="table-wrap"><table><tr><th>Created</th><th>Message</th><th>To</th><th>Text</th><th></th></tr>
 ${rows.map((n) => html`<tr><td>${fmtDateTime(n.created_at)}<br><span class="muted">${n.code} · ${notify.CODES[n.code] || ''}</span></td>

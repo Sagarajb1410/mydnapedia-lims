@@ -2,6 +2,7 @@
 // escapes it unless it is already trusted markup (raw / nested html``).
 class Raw { constructor(s) { this.s = s; } toString() { return this.s; } }
 const raw = (s) => new Raw(String(s));
+const config = require('../config');
 
 function esc(v) {
   return String(v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -280,7 +281,7 @@ function page({ title, user, path = '', flash, body, bare, query = {} }) {
 <div class="content"><div class="topbar">
 <label for="navt" class="menu iconbtn" aria-label="Menu">${icon('menu')}</label>
 <form class="find" method="get" action="/samples" role="search">${icon('search')}<input name="q" value="${query.q || ''}" placeholder="Find a sample" aria-label="Find a sample" autocomplete="off"></form>
-<span class="testflag" title="Test version: dummy data only. Nothing is sent to patients or partners.">Test version<b> · dummy data</b></span></div>
+${config.live ? '' : html`<span class="testflag" title="Test version: dummy data only. Nothing is sent to patients or partners.">Test version<b> · dummy data</b></span>`}</div>
 <main>${flashBox}${body}</main></div></div><script>${raw(SCRIPT)}</script></body></html>`;
 }
 

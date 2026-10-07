@@ -412,6 +412,6 @@ ${v.seller.pan ? html`Company's PAN : <b>${v.seller.pan}</b><br><br>` : ''}<u>De
 <tr><td style="border-right:0"></td><td class="sign" style="border-left:0"><b>for ${v.seller.name}</b><br><br><br>Authorised Signatory</td></tr></table>
 ${v.jurisdiction ? html`<p class="c" style="margin:6px 0 0">SUBJECT TO ${v.jurisdiction.toUpperCase()} JURISDICTION</p>` : ''}
 <p class="c" style="margin:2px 0 0">This is a Computer Generated Invoice</p>
-<p class="test">Test version with dummy data. SAC code and GST rate to be confirmed with the accountant before real use.</p></div></body></html>`.toString());
+${require('../config').live ? '' : html`<p class="test">Test version with dummy data. SAC code and GST rate to be confirmed with the accountant before real use.</p>`}</div></body></html>`.toString());
   });
 };
