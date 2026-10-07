@@ -54,6 +54,13 @@ function demo(db, store = null) {
   const root = db.get("SELECT u.*, NULL AS account_type FROM users u WHERE role = 'admin' ORDER BY id LIMIT 1");
   setSetting(db, 'courierWhatsapp', '9800000000');
   setSetting(db, 'courierName', 'Demo Courier Services');
+  // Invented company details so the demo invoices look complete.
+  setSetting(db, 'companyAddress', 'Demo Office, 2nd Floor, Baner Road, Pune 411045');
+  setSetting(db, 'companyGstin', '27AAACT0000D1Z5');
+  setSetting(db, 'companyPan', 'AAACT0000D');
+  setSetting(db, 'bankName', 'Demo Bank');
+  setSetting(db, 'bankAccount', '000000000000');
+  setSetting(db, 'bankIfsc', 'Baner, Pune & DEMO0000001');
 
   const day = istDate();
   for (const t of TESTS) {

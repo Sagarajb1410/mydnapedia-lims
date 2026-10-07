@@ -317,6 +317,21 @@ const MIGRATIONS = [
     UNIQUE (sample_pk, version)
   );
   `,
+  // 5: documents saved from Report Centre (counselling form, case file)
+  `
+  CREATE TABLE studio_docs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sample_pk INTEGER NOT NULL REFERENCES samples(id),
+    kind TEXT NOT NULL CHECK (kind IN ('form','case')),
+    file_key TEXT NOT NULL,
+    file_name TEXT NOT NULL,
+    mime TEXT,
+    size INTEGER NOT NULL,
+    uploaded_by INTEGER REFERENCES users(id),
+    uploaded_at TEXT NOT NULL
+  );
+  CREATE INDEX studio_docs_sample ON studio_docs(sample_pk);
+  `,
 ];
 
 // Audit rows must never change: block UPDATE and DELETE at database level.

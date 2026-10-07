@@ -29,6 +29,7 @@ const ICON_PATHS = {
   reports: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 14.5l2 2 4-4"/>',
   counselling: '<path d="M21 11.5a8.4 8.4 0 0 1-12.3 7.5L3 21l1.9-5.4A8.5 8.5 0 1 1 21 11.5z"/><path d="M8.5 10.5h7M8.5 14h4"/>',
   chart: '<path d="M3 3v18h18"/><path d="M7.5 16v-4M12 16V8M16.5 16v-6"/>',
+  plan: '<path d="M9 4h6v3H9z"/><path d="M15 5.5h2.5A1.5 1.5 0 0 1 19 7v12.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 5 19.5V7a1.5 1.5 0 0 1 1.5-1.5H9"/><path d="M9 13.5l2 2 4-4"/>',
   billing: '<rect x="2.5" y="5.5" width="19" height="14" rx="2"/><path d="M2.5 10h19"/><path d="M16 15h2.5"/>',
   outbox: '<path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4z"/>',
   admin: '<path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/>',
@@ -230,16 +231,17 @@ table.stack thead{display:none}table.stack tr{display:block;padding:12px 14px;bo
 const NAV = {
   admin: [['Overview', [['/', 'Dashboard', 'dashboard']]],
     ['Samples', [['/samples', 'Samples', 'samples'], ['/samples/new', 'Register', 'register']]],
-    ['Lab', [['/tracking', 'Tracking', 'tracking'], ['/reports', 'Reports', 'reports']]],
-    ['Clients', [['/counselling', 'Counselling', 'counselling']]],
+    ['Lab', [['/tracking', 'Tracking', 'tracking']]],
+    ['Report Centre', [['/reports', 'Reports', 'reports'], ['/counselling', 'Counselling', 'counselling'], ['/plans', 'Action plans', 'plan']]],
     ['Business', [['/billing', 'Billing', 'billing'], ['/monthly', 'Monthly report', 'chart'], ['/outbox', 'Outbox', 'outbox']]],
     ['Settings', [['/admin', 'Admin', 'admin']]]],
   lab: [['Overview', [['/', 'Dashboard', 'dashboard']]],
     ['Samples', [['/samples', 'Samples', 'samples'], ['/samples/new', 'Register', 'register']]],
-    ['Lab', [['/tracking', 'Tracking', 'tracking'], ['/reports', 'Reports', 'reports']]],
+    ['Lab', [['/tracking', 'Tracking', 'tracking']]],
+    ['Report Centre', [['/reports', 'Reports', 'reports']]],
     ['Messages', [['/outbox', 'Outbox', 'outbox']]]],
   partner: [['Your work', [['/samples', 'Registration', 'samples'], ['/samples/new', 'New sample', 'register'], ['/billing', 'Billing', 'billing']]]],
-  counsellor: [['Your work', [['/counselling', 'Counselling', 'counselling'], ['/samples', 'Clients', 'samples']]]],
+  counsellor: [['Report Centre', [['/counselling', 'Counselling', 'counselling'], ['/plans', 'Action plans', 'plan']]], ['Clients', [['/samples', 'Clients', 'samples']]]],
 };
 
 const ROLE_LABEL = { admin: 'Admin', lab: 'Lab staff', partner: 'B2B partner', counsellor: 'Counsellor' };
