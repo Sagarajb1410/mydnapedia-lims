@@ -13,6 +13,15 @@ const SETTING_LABELS = {
   sampleIdPrefix: 'Sample ID prefix',
   companyGstin: 'MyDNAPedia GSTIN',
   companyAddress: 'Company address',
+  companyLegalName: 'Company legal name (on invoices)',
+  companyState: 'Company state (decides CGST + SGST or IGST)',
+  companyPan: 'Company PAN',
+  invoiceSac: 'SAC code for tests (confirm with your accountant)',
+  invoiceGstRate: 'GST rate % included in test prices (0 = bill of supply)',
+  bankName: 'Bank name (on invoices)',
+  bankAccount: 'Bank account number',
+  bankIfsc: 'Bank branch and IFSC',
+  jurisdiction: 'Jurisdiction city (invoice footer)',
   courierName: 'Main courier vendor',
   courierWhatsapp: 'Courier vendor WhatsApp number',
   partnerLabAddress: 'Partner lab address (for onward dispatch; shown only to the courier)',
@@ -43,6 +52,7 @@ ${Object.keys(SETTING_DEFAULTS).map((k) => field(SETTING_LABELS[k] || k, k, getS
     onlyAdmin(ctx);
     const prefix = (ctx.body.sampleIdPrefix || '').trim().toUpperCase();
     if (!/^[A-Z]{2,5}$/.test(prefix)) throw new UserError('The sample ID prefix must be 2 to 5 letters.');
+    if ('invoiceGstRate' in ctx.body && !['0', '5', '12', '18', '28'].includes(String(ctx.body.invoiceGstRate).trim())) throw new UserError('The GST rate must be 0, 5, 12, 18 or 28.');
     for (const k of Object.keys(SETTING_DEFAULTS)) if (k in ctx.body) setSetting(db, k, k === 'sampleIdPrefix' ? prefix : String(ctx.body[k]).trim());
     require('../util').audit(db, ctx.user.id, 'settings_changed', 'settings', null, ctx.body);
     h.redirect(ctx, '/admin', { type: 'ok', text: 'Settings saved.' });

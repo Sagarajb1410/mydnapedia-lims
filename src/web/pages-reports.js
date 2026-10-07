@@ -68,7 +68,12 @@ ${rows.map((r) => {
 <td>${statusPill(r.status, samples.STATUSES[r.status])}</td><td>${extra ? extra(r) : t ? html`<span class="pill ${t.level === 'red' ? 'bad' : t.level === 'amber' ? 'warn' : 'good'}">${t.level === 'red' ? 'Overdue' : `${t.daysLeft.toFixed(1)} days left`}</span>` : ''}</td></tr>`;
   })}
 ${rows.length ? '' : html`<tr><td colspan="5" class="muted">${empty}</td></tr>`}</table></div>`;
-    h.send(ctx, 'Reports', html`<h1>Reports</h1><p class="sub">From the partner lab or in-house result, to a checked and approved MyDNAPedia report.</p>
+    const step = (n, title, text) => html`<div class="kpi"><span class="k">Step ${n}</span><b style="font-size:16px;margin-top:6px">${title}</b><small>${text}</small></div>`;
+    h.send(ctx, 'White-labelling', html`<h1>White-labelling</h1><p class="sub">From the partner lab's report to a checked, approved MyDNAPedia report.</p>
+<div class="kpis">${step(1, 'Add the partner report', 'Open the sample and upload the PDF the partner lab sent.')}
+${step(2, 'Convert in Report Studio', 'Report Studio swaps in our branding, cover and sample ID, on this computer.')}
+${step(3, 'Upload and check', 'The LIMS blocks any partner name, partner reference or wrong sample ID.')}
+${step(4, 'Approve and release', 'The admin looks at every page, then releases it to the client.')}</div>
 <h2>1. Waiting for the result (${q.awaitingSource.length})</h2>${table(q.awaitingSource, 'Nothing waiting.')}
 <h2>2. Waiting for the white-labelled report (${q.awaitingBranded.length})</h2>${table(q.awaitingBranded, 'Nothing waiting.')}
 <h2>3. Waiting for approval (${q.awaitingApproval.length})</h2>${table(q.awaitingApproval, 'Nothing waiting.')}
