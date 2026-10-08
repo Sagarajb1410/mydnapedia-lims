@@ -13,7 +13,7 @@ const STEPS = ['convert', 'form', 'plan'];
 module.exports = function (router, { db, storage }, h) {
   router.get('/studio', (ctx) => {
     if (!ROLES.includes(ctx.user.role)) throw new UserError('Report Centre is for MyDNAPedia staff and counsellors.');
-    const sample = /^[A-Za-z]{2,5}\d{2}-\d{6}$/.test(ctx.query.sample || '') ? ctx.query.sample.toUpperCase() : '';
+    const sample = /^[A-Za-z0-9-]{4,30}$/.test(ctx.query.sample || '') ? ctx.query.sample.toUpperCase() : '';
     if (sample) samples.load(db, ctx.user, sample);
     const step = STEPS.includes(ctx.query.step) ? ctx.query.step : (ctx.user.role === 'counsellor' ? 'form' : 'convert');
     const page = studio.page(db, storage, ctx.user, { sample, step });
@@ -65,7 +65,7 @@ module.exports = function (router, { db, storage }, h) {
 
 // The heading shared by the three Report Centre pages.
 module.exports.head = function head(user, active, sub) {
-  const tabs = [['/reports', 'Reports', ['admin', 'lab']], ['/counselling', 'Counselling', ['admin', 'counsellor']], ['/plans', 'Action plans', ['admin', 'counsellor']]]
+  const tabs = [['/reports', 'Reports', ['admin', 'lab']], ['/counselling', 'Counselling', ['admin', 'counsellor']], ['/counselling/availability', 'Availability', ['admin', 'counsellor']], ['/plans', 'Action plans', ['admin', 'counsellor']]]
     .filter(([, , roles]) => roles.includes(user.role));
   return html`<div class="head"><div><h1>${studio.NAME}</h1><p class="sub">${sub}</p></div>
 <div class="actions" style="margin:0"><a class="btn" href="/studio" target="_blank" rel="noopener">${icon('reports')}Open ${studio.NAME}</a></div></div>

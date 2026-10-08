@@ -9,12 +9,14 @@ const storage = require('../src/storage');
 const seed = require('../src/seed');
 const pdfwrite = require('../src/pdfwrite');
 const studio = require('../src/studio');
+const { FORM_PATCHES } = require('../src/studio-form');
 const { createApp } = require('../src/web/app');
 
 // A stand-in for the Report Studio file with the pieces the LIMS adjusts.
 const FAKE = `<!doctype html><html><head><title>Report Studio</title></head><body><input type="file" id="pick">
 <script>var app="mdp-report-studio";var cfg={lims:{url:"",key:"",afterReport:"none"},partnerTerms:["Zeta Labs","ZetaGx"]};
-${studio.LINK_PATCHES.map(([from]) => `/*${from}*/`).join('\n')}</script></body></html>`;
+${studio.LINK_PATCHES.map(([from]) => `/*${from}*/`).join('\n')}
+${FORM_PATCHES.map(([from]) => `/*${from}*/`).join('\n')}</script></body></html>`;
 
 async function withApp(fn) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lims-studio-'));
@@ -40,11 +42,12 @@ test('Report Centre is installed, renamed and linked to the LIMS', async () => {
     assert.ok(!store.get('studio/report-studio.html').toString().includes('Zeta'), 'built-in partner names are removed when stored');
 
     const cookie = await signIn(base, 'lab@demo.example');
-    const page = await (await fetch(`${base}/studio?sample=MDP26-000008&step=convert`, { headers: { cookie } })).text();
+    const page = await (await fetch(`${base}/studio?sample=MDP00020260008&step=convert`, { headers: { cookie } })).text();
     assert.match(page, /<title>Report Centre<\/title>/);
     assert.match(page, /partnerTerms:\["Acme Genomics","AcmeGx"\]/, 'the admin\'s names are used');
-    assert.match(page, /window\.__LIMS=\{"url":"\/studio\/api","key":"[0-9a-f]{64}","sample":"MDP26-000008","step":"convert"/);
+    assert.match(page, /window\.__LIMS=\{"url":"\/studio\/api","key":"[0-9a-f]{64}","sample":"MDP00020260008","step":"convert"/);
     for (const [, to] of studio.LINK_PATCHES) assert.ok(page.includes(to));
+    assert.ok(page.includes('function mdpFormTables(r)'), 'counselling forms with a changed layout can be read');
     const partner = await signIn(base, 'sunrise@demo.example');
     assert.notStrictEqual((await fetch(`${base}/studio`, { headers: { cookie: partner }, redirect: 'manual' })).status, 200);
 
@@ -52,14 +55,14 @@ test('Report Centre is installed, renamed and linked to the LIMS', async () => {
     const key = /"key":"([0-9a-f]{64})"/.exec(page)[1];
     const call = async (body) => (await fetch(`${base}/studio/api`, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ ...body, key }) })).json();
     assert.deepStrictEqual(await call({ action: 'ping' }), { ok: true, data: { lab: 'MyDNAPedia' } });
-    const found = await call({ action: 'find', sampleId: 'mdp26-000008' });
+    const found = await call({ action: 'find', sampleId: 'mdp00020260008' });
     assert.ok(found.ok);
-    assert.strictEqual(found.data.sample.sampleId, 'MDP26-000008');
+    assert.strictEqual(found.data.sample.sampleId, 'MDP00020260008');
     assert.strictEqual(found.data.stage, 'Partner report received');
-    assert.deepStrictEqual((await call({ action: 'find', sampleId: 'MDP26-999999' })).ok, false);
+    assert.deepStrictEqual((await call({ action: 'find', sampleId: 'MDP00020269999' })).ok, false);
     assert.match((await (await fetch(`${base}/studio/api`, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify({ action: 'ping', key: 'nope' }) })).json()).error, /expired/);
 
-    const s = d.get("SELECT * FROM samples WHERE sample_id = 'MDP26-000008'");
+    const s = d.get("SELECT * FROM samples WHERE sample_id = 'MDP00020260008'");
     const p = d.get('SELECT * FROM patients WHERE id = ?', s.patient_id);
     const pdf = (lines) => pdfwrite.write([lines], { title: 'MDP Skin Health', author: 'MyDNAPedia' }).toString('base64');
     const leak = await call({ action: 'push', sampleId: s.sample_id, kind: 'report', name: 'r.pdf', mime: 'application/pdf', b64: pdf(['MyDNAPedia', `Name: ${p.full_name}  Sample ID: ${s.sample_id}`, 'Analysed by Acme Genomics']) });
@@ -76,21 +79,21 @@ test('a case sent from Report Centre is stored and fills in the counselling form
     const admin = d.get("SELECT * FROM users WHERE email = 'admin@mydnapedia.example'");
     studio.install(d, store, admin, { data: Buffer.from(FAKE) });
     const cookie = await signIn(base, 'counsellor@demo.example');
-    const page = await (await fetch(`${base}/studio?sample=MDP26-000014&step=form`, { headers: { cookie } })).text();
+    const page = await (await fetch(`${base}/studio?sample=MDP00020260014&step=form`, { headers: { cookie } })).text();
     const key = /"key":"([0-9a-f]{64})"/.exec(page)[1];
     const call = async (body) => (await fetch(`${base}/studio/api`, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify({ ...body, key }) })).json();
-    const before = await call({ action: 'loadCase', sampleId: 'MDP26-000014' });
+    const before = await call({ action: 'loadCase', sampleId: 'MDP00020260014' });
     assert.ok(before.data.found, 'a case is built from the LIMS when none was saved');
     const c = JSON.parse(before.data.json);
     c.form = { ...c.form, heightCm: '170', weightKg: '70', bp: '120/80', priorities: 'Walk daily', life: { diet: 'Vegetarian', actType: 'Walking', sleepHours: '7-8', tobacco: 'Never', alcohol: 'Never' } };
-    const sent = await call({ action: 'push', sampleId: 'MDP26-000014', kind: 'case', name: 'case.json', mime: 'application/json', b64: Buffer.from(JSON.stringify(c)).toString('base64') });
+    const sent = await call({ action: 'push', sampleId: 'MDP00020260014', kind: 'case', name: 'case.json', mime: 'application/json', b64: Buffer.from(JSON.stringify(c)).toString('base64') });
     assert.ok(sent.ok, sent.error);
     assert.match(sent.data.skipped, /complete/);
-    const s = d.get("SELECT id FROM samples WHERE sample_id = 'MDP26-000014'");
+    const s = d.get("SELECT id FROM samples WHERE sample_id = 'MDP00020260014'");
     const f = d.get('SELECT * FROM counselling_forms WHERE sample_pk = ?', s.id);
     assert.strictEqual(f.status, 'complete');
     assert.strictEqual(String(JSON.parse(f.data_json).heightCm), '170');
-    const after = await call({ action: 'loadCase', sampleId: 'MDP26-000014' });
+    const after = await call({ action: 'loadCase', sampleId: 'MDP00020260014' });
     assert.strictEqual(JSON.parse(after.data.json).form.heightCm, '170', 'the saved case comes back');
   });
 });

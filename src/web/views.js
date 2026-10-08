@@ -45,6 +45,8 @@ const ICON_PATHS = {
   arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
   back: '<path d="M19 12H5M11 18l-6-6 6-6"/>',
   print: '<path d="M6 9V3h12v6"/><rect x="3" y="9" width="18" height="8" rx="2"/><path d="M6 14h12v7H6z"/>',
+  upload: '<path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/>',
+  download: '<path d="M12 4v12M7 11l5 5 5-5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
 };
 function icon(name, cls = '') {
@@ -233,7 +235,7 @@ const NAV = {
   admin: [['Overview', [['/', 'Dashboard', 'dashboard']]],
     ['Samples', [['/samples', 'Samples', 'samples'], ['/samples/new', 'Register', 'register']]],
     ['Lab', [['/tracking', 'Tracking', 'tracking']]],
-    ['Report Centre', [['/reports', 'Reports', 'reports'], ['/counselling', 'Counselling', 'counselling'], ['/plans', 'Action plans', 'plan']]],
+    ['Report Centre', [['/reports', 'Reports', 'reports'], ['/counselling', 'Counselling', 'counselling'], ['/counselling/availability', 'Availability', 'clock'], ['/plans', 'Action plans', 'plan']]],
     ['Business', [['/billing', 'Billing', 'billing'], ['/monthly', 'Monthly report', 'chart'], ['/outbox', 'Outbox', 'outbox']]],
     ['Settings', [['/admin', 'Admin', 'admin']]]],
   lab: [['Overview', [['/', 'Dashboard', 'dashboard']]],
@@ -242,7 +244,7 @@ const NAV = {
     ['Report Centre', [['/reports', 'Reports', 'reports']]],
     ['Messages', [['/outbox', 'Outbox', 'outbox']]]],
   partner: [['Your work', [['/samples', 'Registration', 'samples'], ['/samples/new', 'New sample', 'register'], ['/billing', 'Billing', 'billing']]]],
-  counsellor: [['Report Centre', [['/counselling', 'Counselling', 'counselling'], ['/plans', 'Action plans', 'plan']]], ['Clients', [['/samples', 'Clients', 'samples']]]],
+  counsellor: [['Report Centre', [['/counselling', 'Counselling', 'counselling'], ['/counselling/availability', 'My availability', 'clock'], ['/plans', 'Action plans', 'plan']]], ['Clients', [['/samples', 'Clients', 'samples']]]],
 };
 
 const ROLE_LABEL = { admin: 'Admin', lab: 'Lab staff', partner: 'B2B partner', counsellor: 'Counsellor' };

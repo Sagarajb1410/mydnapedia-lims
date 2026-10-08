@@ -15,6 +15,10 @@ function staffOnly(ctx) {
 
 function checkResult(check) {
   if (!check) return '';
+  if (check.pictureOnly) {
+    return html`<div class="flash warn" style="margin:8px 0"><div><b>Pictures only.</b> The LIMS cannot read any text in this report, so it could not check it for partner names or the sample ID.
+The admin must check all ${check.pages || ''} pages by eye before approving. Tip: a report saved straight from Report Centre has real text and is checked automatically.</div></div>`;
+  }
   return html`${check.problems.length ? html`<div class="flash error" style="margin:8px 0"><b>Blocked.</b> ${check.problems.length === 1 ? check.problems[0] : html`<ul style="margin:4px 0 0 18px;padding:0">${check.problems.map((p) => html`<li>${p}</li>`)}</ul>`}</div>`
     : html`<div class="flash ok" style="margin:8px 0">Passed the check: no partner names, partner reference or wrong sample ID found in ${check.pages} pages.</div>`}
 ${check.warnings.length ? html`<div class="flash warn" style="margin:8px 0"><ul style="margin:0 0 0 18px;padding:0">${check.warnings.map((w) => html`<li>${w}</li>`)}</ul></div>` : ''}`;
@@ -40,17 +44,18 @@ ${list.map((r) => html`<tr><td><a href="/reports/${r.id}/file" target="_blank">$
 <td><span class="pill ${REPORT_TONE[r.status] || ''}">${REPORT_STATUS[r.status]}</span>${r.review_note ? html`<br><span class="muted">${r.reviewed_by_name}: ${r.review_note}</span>` : ''}</td></tr>`)}</table></div>` : ''}
 ${branded[0] && ['blocked', 'pending'].includes(branded[0].status) ? checkResult(branded[0].check) : ''}
 ${canSource ? html`<form method="post" action="/samples/${s.sample_id}/report/source" enctype="multipart/form-data" class="noprint" style="margin-top:12px">
-<label for="source-file">${sources.length ? `Replace the ${sourceLabel.toLowerCase()}` : `Add the ${sourceLabel.toLowerCase()}`} (PDF)</label><input id="source-file" type="file" name="file" accept="application/pdf" required>
+<label for="source-file">${sources.length ? `Replace the ${sourceLabel.toLowerCase()} (saved as v${sources[0].version + 1}; earlier versions are kept)` : `Add the ${sourceLabel.toLowerCase()}`} (PDF)</label><input id="source-file" type="file" name="file" accept="application/pdf" required>
 <div class="actions"><button class="${canBranded ? 'light' : ''}">Upload</button></div></form>` : ''}
 ${canBranded && sources.length ? html`<div class="actions noprint" style="margin-top:12px">${h.studioButton('Convert in Report Centre', s.sample_id, 'convert', '')}</div>
 <p class="muted" style="margin:4px 0 0">Report Centre opens with this partner report and the client's details loaded. Send the result back from its LIMS tab.</p>` : ''}
 ${canBranded ? html`<form method="post" action="/samples/${s.sample_id}/report/branded" enctype="multipart/form-data" class="noprint" style="margin-top:12px">
-<label for="branded-file">Or upload the white-labelled report by hand (PDF)</label><input id="branded-file" type="file" name="file" accept="application/pdf" required>
+<label for="branded-file">${branded.length ? `Upload a corrected white-labelled report (saved as v${branded[0].version + 1}; earlier versions are kept)` : 'Or upload the white-labelled report by hand'} (PDF)</label><input id="branded-file" type="file" name="file" accept="application/pdf" required>
 <p class="muted" style="margin:4px 0 0">It is checked for partner names, the partner's reference and this sample's ID before anyone can approve it.</p>
 <div class="actions"><button>Upload and check</button></div></form>` : ''}
 ${pending && user.role === 'admin' ? html`<form method="post" action="/reports/${pending.id}/review" class="noprint" style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px">
 <b>Approve the white-labelled report</b><p class="muted" style="margin:4px 0"><a href="/reports/${pending.id}/file" target="_blank">Open it</a> and look at every page, including pictures.</p>
 <label style="font-weight:400;display:flex;gap:8px;align-items:center"><input type="checkbox" name="pages_checked" value="yes" style="width:auto"> I looked at every page and it shows no partner lab name or logo.</label>
+${pending.check && pending.check.pictureOnly ? html`<label style="font-weight:400;display:flex;gap:8px;align-items:center;margin-top:6px"><input type="checkbox" name="pictures_checked" value="yes" style="width:auto"> Pictures only: I also checked that it shows sample ID ${s.sample_id} and the client's name, and no partner reference.</label>` : ''}
 <div style="margin-top:8px"><label for="review-note">Note <span class="opt">(needed to send it back)</span></label><input id="review-note" name="note"></div>
 <div class="actions"><button name="do" value="approve">Approve</button><button class="danger" name="do" value="reject">Send back</button></div></form>` : ''}
 ${pending && user.role !== 'admin' ? html`<p class="muted">Waiting for the admin to approve.</p>` : ''}
@@ -92,14 +97,15 @@ ${step(4, 'Approve and release', 'The admin looks at every page, then releases i
   router.post('/samples/:id/report/branded', (ctx) => {
     const r = reports.uploadBranded(db, storage, ctx.user, ctx.params.id, ctx.files.file);
     h.redirect(ctx, `/samples/${ctx.params.id}`, r.check.ok
-      ? { type: 'ok', text: 'The report passed the check and is waiting for the admin to approve it.' }
+      ? { type: 'ok', text: `Saved as v${r.version}. It passed the check and is waiting for the admin to approve it.` }
+      : r.check.pictureOnly ? { type: 'warn', text: `Saved as v${r.version}. It is pictures only, so the admin must check every page by eye before approving it.` }
       : { type: 'error', text: 'The report was blocked. See what was found below, fix it in Report Centre and send it again.' });
   });
   router.post('/reports/:id/review', (ctx) => {
     const r = reports.report(db, ctx.params.id);
     const s = db.get('SELECT sample_id FROM samples WHERE id = ?', r.sample_pk);
     const approve = ctx.body.do === 'approve';
-    reports.review(db, storage, ctx.user, r.id, { approve, note: ctx.body.note, pagesChecked: ctx.body.pages_checked === 'yes' });
+    reports.review(db, storage, ctx.user, r.id, { approve, note: ctx.body.note, pagesChecked: ctx.body.pages_checked === 'yes', picturesChecked: ctx.body.pictures_checked === 'yes' });
     h.redirect(ctx, `/samples/${s.sample_id}`, { type: 'ok', text: approve ? 'Approved. Release it when you are ready to send it to the client.' : 'Sent back to the lab with your note.' });
   });
   router.post('/reports/:id/release', (ctx) => {

@@ -40,9 +40,9 @@ function atPartner(db, lab) {
 const file = (lines) => ({ filename: 'x.pdf', data: pdfwrite.write([lines]) });
 
 test('text extraction handles simple fonts, Type0 fonts with ToUnicode and compressed streams', () => {
-  const simple = pdftext.extract(pdfwrite.write([['Hello (World) MDP26-000001'], ['Second page']]));
+  const simple = pdftext.extract(pdfwrite.write([['Hello (World) MDP00020260001'], ['Second page']]));
   assert.equal(simple.pages.length, 2);
-  assert.match(simple.pages[0].text, /Hello \(World\) MDP26-000001/);
+  assert.match(simple.pages[0].text, /Hello \(World\) MDP00020260001/);
   const chrome = pdftext.extract(fs.readFileSync(path.join(__dirname, 'fixtures', 'chrome-cid.pdf')));
   const flat = chrome.pages.map((p) => p.text).join(' ').replace(/\s+/g, '');
   assert.ok(flat.includes('AcmeGenomicsLabs'), 'Type0 text decoded');
@@ -95,7 +95,7 @@ test('the check blocks partner names, split names, metadata, the partner referen
   assert.equal(check(ok).ok, true);
   assert.match(check([...ok, 'Tested by ACME   genomics']).problems.join(), /Acme Genomics/);
   assert.match(check([...ok, 'Ref PLREF-7788']).problems.join(), /partner lab's own reference/);
-  assert.match(check(['Report Person MDP26-999999', ok[1]]).problems.join(), /does not show this sample's ID/);
+  assert.match(check(['Report Person MDP00020269999', ok[1]]).problems.join(), /does not show this sample's ID/);
   assert.match(check(ok, { author: 'AcmeGx' }).problems.join(), /file properties/);
   assert.match(check(ok, { producer: 'iText 5.5' }).problems.join(), /iText/);
   assert.match(check(['', '']).problems.join(), /No readable text/);
@@ -141,4 +141,28 @@ test('demo data shows a released, a pending and a blocked report', () => {
   const { db } = fresh();
   const st = new Set(db.all("SELECT status FROM reports WHERE kind = 'branded'").map((r) => r.status));
   assert.deepEqual([...st].sort(), ['blocked', 'pending', 'released']);
+});
+
+test('a pictures-only report needs the admin to check it by eye, and an approved report can still be replaced', () => {
+  const { db, store, admin, lab } = fresh();
+  const s = atPartner(db, lab);
+  reports.uploadSource(db, store, lab, s.sample_id, file(['partner report']));
+  const pic = reports.uploadBranded(db, store, lab, s.sample_id, file(['', '']));
+  assert.equal(pic.check.ok, false);
+  assert.equal(pic.check.pictureOnly, true);
+  assert.equal(reports.report(db, pic.id).status, 'pending');
+  assert.throws(() => reports.review(db, store, admin, pic.id, { approve: true, pagesChecked: true }), /pictures only/);
+  reports.review(db, store, admin, pic.id, { approve: true, pagesChecked: true, picturesChecked: true });
+  assert.equal(db.get('SELECT status FROM samples WHERE id = ?', s.id).status, 'REPORT_APPROVED');
+  // A corrected version replaces the approved one before release.
+  const ok = [`Report Person ${s.sample_id}`, 'Result text long enough to be a real report page for checking.'];
+  const v2 = reports.uploadBranded(db, store, lab, s.sample_id, file(ok));
+  assert.equal(v2.version, 2);
+  assert.equal(reports.report(db, pic.id).status, 'superseded');
+  assert.equal(db.get('SELECT status FROM samples WHERE id = ?', s.id).status, 'REPORT_WHITE_LABELLED');
+  reports.review(db, store, admin, v2.id, { approve: true, pagesChecked: true });
+  reports.release(db, store, admin, v2.id);
+  assert.equal(db.get('SELECT status FROM samples WHERE id = ?', s.id).status, 'REPORT_RELEASED');
+  // A partner name in readable text still blocks outright.
+  assert.equal(reports.checkReport(db, pdfwrite.write([[...ok, 'Acme Genomics']]), db.get('SELECT * FROM samples WHERE id = ?', s.id)).pictureOnly, false);
 });

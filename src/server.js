@@ -65,8 +65,7 @@ function openBrowser() {
 const server = app.server();
 server.on('error', (e) => {
   if (e.code === 'EADDRINUSE') {
-    console.error(`\n  Port ${config.port} is already in use. The LIMS is probably already running in another window:\n  open ${url} in your browser, or close the other window and start again.\n`);
-    if (process.argv.includes('--open')) openBrowser();
+    console.error(`\n  Port ${config.port} is already in use. The LIMS is probably already running in another window:\n  open ${url} in your browser, or close the other window and start again.\n  To switch between the demo and your own data, close the other LIMS window first.\n`);
   } else {
     console.error(e);
   }

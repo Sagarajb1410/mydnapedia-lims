@@ -19,6 +19,7 @@ const samples = require('./samples');
 const reports = require('./reports');
 const counselling = require('./counselling');
 const form = require('./counselling-form');
+const { FORM_PATCHES } = require('./studio-form');
 const { nowIso, audit, UserError, getSetting } = require('./util');
 
 const STORE_KEY = 'studio/report-studio.html';
@@ -80,6 +81,8 @@ function base(db, storage) {
   let text = s.text.replace(TERMS_RE, `partnerTerms:${js(terms)}`);
   const linked = LINK_PATCHES.every(([from]) => text.includes(from));
   if (linked) for (const [from, to] of LINK_PATCHES) text = text.replace(from, () => to);
+  // Reads counselling forms whose layout was changed in Word (see studio-form.js).
+  if (FORM_PATCHES.every(([from]) => text.includes(from))) for (const [from, to] of FORM_PATCHES) text = text.replace(from, () => to);
   text = text.replace(/Report Studio/g, NAME);
   cache = { raw: s.text, terms: terms.join('|'), text, linked };
   return cache;
@@ -218,9 +221,9 @@ function api(db, storage, req) {
     switch (req.kind) {
       case 'report':
         r = reports.uploadBranded(db, storage, user, s.sample_id, file);
-        if (!r.check.ok) throw new UserError(`Blocked by the LIMS check: ${r.check.problems.join(' ')}`);
+        if (!r.check.ok && !r.check.pictureOnly) throw new UserError(`Blocked by the LIMS check: ${r.check.problems.join(' ')}`);
         audit(db, user.id, 'report_centre_push', 'sample', s.sample_id, { kind: 'report', version: r.version });
-        return { status: true, stage: stage(), skipped: `Stored as v${r.version}. It passed the check and waits for the admin's approval in the LIMS` };
+        return { status: true, stage: stage(), skipped: `Stored as v${r.version}. ${r.check.ok ? 'It passed the check' : 'It is pictures only, so the admin checks it by eye,'} and waits for the admin's approval in the LIMS` };
       case 'partner_report':
         r = reports.uploadSource(db, storage, user, s.sample_id, file);
         return { status: true, stage: stage() };

@@ -1,7 +1,8 @@
 // Sample registration, collection, cancellation and the status timeline.
-const { nowIso, istDate, audit, nextCounter, UserError, getSetting } = require('./util');
+const { nowIso, istDate, audit, nextCounter, UserError, getSetting, fmtDateTime } = require('./util');
 const billing = require('./billing');
 const notify = require('./notify');
+const track = require('./track');
 
 // Full lifecycle from guideline section 4. Modules 1 and 2 use the first two
 // and the side statuses; the rest are switched on as later modules are built.
@@ -99,10 +100,47 @@ function validatePatient(p) {
   return out;
 }
 
+// Sample IDs follow the admin's format: {PREFIX} the prefix, {YYYY} or {YY}
+// the year, {N4} the running number with 4 digits (any count from 3 to 9).
+// With a year in the format the number restarts each year.
+const FORMAT_RE = /^(?:[A-Z0-9-]|\{PREFIX\}|\{YYYY\}|\{YY\}|\{N[3-9]\})+$/;
+function checkFormat(format) {
+  const f = String(format || '').trim().toUpperCase();
+  if (!FORMAT_RE.test(f) || (f.match(/\{N[3-9]\}/g) || []).length !== 1) {
+    throw new UserError('The sample ID format may use letters, digits, dashes, {PREFIX}, {YYYY} or {YY}, and exactly one running number such as {N4}.');
+  }
+  return f;
+}
+function formatSampleId(format, prefix, year, n) {
+  return format.replace('{PREFIX}', prefix).replace('{YYYY}', year).replace('{YY}', year.slice(2))
+    .replace(/\{N(\d)\}/, (_, d) => String(n).padStart(Number(d), '0'));
+}
+// The counter the format uses: one per year when the year is in the ID.
+function counterName(format, year = istDate().slice(0, 4)) {
+  return /\{YY(YY)?\}/.test(format) ? `sample-${year}` : 'sample';
+}
+function sampleIdFormat(db) {
+  try { return checkFormat(getSetting(db, 'sampleIdFormat')); } catch { return '{PREFIX}{YY}-{N6}'; }
+}
+function nextSampleNumber(db) {
+  const row = db.get('SELECT value FROM counters WHERE name = ?', counterName(sampleIdFormat(db)));
+  return (row ? row.value : 0) + 1;
+}
+function setNextSampleNumber(db, next) {
+  const n = Number(next);
+  if (!Number.isInteger(n) || n < 0) throw new UserError('The next sample number must be a whole number.');
+  const name = counterName(sampleIdFormat(db));
+  db.run('INSERT INTO counters (name, value) VALUES (?, ?) ON CONFLICT(name) DO UPDATE SET value = excluded.value', name, n - 1);
+}
 function newSampleId(db) {
-  const yy = istDate().slice(2, 4);
-  const n = nextCounter(db, 'sample-' + yy);
-  return `${getSetting(db, 'sampleIdPrefix')}${yy}-${String(n).padStart(6, '0')}`;
+  const format = sampleIdFormat(db);
+  const year = istDate().slice(0, 4);
+  const prefix = getSetting(db, 'sampleIdPrefix');
+  // Skip any number already used (for example after the next number was set back).
+  for (;;) {
+    const id = formatSampleId(format, prefix, year, nextCounter(db, counterName(format, year)));
+    if (!db.get('SELECT id FROM samples WHERE sample_id = ?', id)) return id;
+  }
 }
 
 function addEvent(db, samplePk, from, to, userId, note) {
@@ -142,6 +180,8 @@ function register(db, user, input) {
   const collectedNow = input.collected_now === 'yes';
   const collector = clean(input.collector);
   if (collectedNow && !collector) throw new UserError('Enter who collected the sample.');
+  // A sample collected earlier and registered late keeps its real collection time.
+  const collectedAt = clean(input.collected_at);
 
   return db.tx(() => {
     const now = nowIso();
@@ -169,10 +209,10 @@ function register(db, user, input) {
       direct: input.direct,
     });
 
-    if (collectedNow) collect(db, user, sample.sample_id, { collector, collectedAt: now });
+    if (collectedNow) collect(db, user, sample.sample_id, { collector, collectedAt: collectedAt || now });
 
     const lab = getSetting(db, 'labName');
-    const msg = `${lab}: Dear ${patient.full_name}, your ${test.name} test has been registered. Your sample ID is ${sampleId}. We will keep you updated. For help contact ${getSetting(db, 'supportPhone')}.`;
+    const msg = `${lab}: Dear ${patient.full_name}, your ${test.name} test has been registered. Your sample ID is ${sampleId}. Track your sample any time at ${track.link(sampleId)} using this ID and the last 4 digits of your mobile. For help contact ${getSetting(db, 'supportPhone')}.`;
     notify.queue(db, { code: 'N1', channel: 'whatsapp', recipient: patient.mobile, recipientName: patient.full_name, body: msg, samplePk: pk });
     notify.queue(db, { code: 'N1', channel: 'email', recipient: patient.email, recipientName: patient.full_name, subject: `Your ${test.name} test is registered`, body: msg, samplePk: pk });
 
@@ -188,6 +228,9 @@ function load(db, user, sampleId) {
   return s;
 }
 
+const LATE_DAYS = 30;
+const fmtWhen = (d) => fmtDateTime(d.toISOString());
+
 function collect(db, user, sampleId, { collector, collectedAt }) {
   return db.tx(() => {
     const s = load(db, user, sampleId);
@@ -197,8 +240,10 @@ function collect(db, user, sampleId, { collector, collectedAt }) {
     const raw = collectedAt || nowIso();
     const when = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(raw) ? new Date(raw + ':00+05:30') : new Date(raw);
     if (Number.isNaN(when.getTime())) throw new UserError('Enter the collection date and time.');
-    if (when > new Date(Date.now() + 5 * 60000)) throw new UserError('Collection time cannot be in the future.');
-    if (when < new Date(new Date(s.registered_at).getTime() - 60000)) throw new UserError('Collection cannot be before registration.');
+    if (when > new Date(Date.now() + 5 * 60000)) throw new UserError(`The collection time you entered (${fmtWhen(when)}) is later than now. Please check the date and AM/PM.`);
+    // Late registration is allowed: the sample may have been collected up to
+    // LATE_DAYS before it was entered in the LIMS.
+    if (when < new Date(new Date(s.registered_at).getTime() - LATE_DAYS * 86400000)) throw new UserError(`The collection date (${fmtWhen(when)}) is more than ${LATE_DAYS} days before registration. Please check it.`);
     db.run("UPDATE samples SET status = 'COLLECTED', collected_at = ?, collector = ? WHERE id = ?", when.toISOString(), clean(collector), s.id);
     addEvent(db, s.id, s.status, 'COLLECTED', user.id, `Collected by ${clean(collector)}`);
     audit(db, user.id, 'sample_collected', 'sample', s.sample_id, { collector });
@@ -245,6 +290,7 @@ function cancel(db, user, sampleId, { reason, refundPaise }) {
 }
 
 module.exports = {
-  STATUSES, BEFORE_LAB, GENDERS, STATES, scope, canRegister, registeringAccount, validatePatient,
+  STATUSES, BEFORE_LAB, GENDERS, STATES, scope, canRegister, registeringAccount, validatePatient, findDuplicate,
   register, load, collect, canEditPatient, editPatient, cancel,
+  checkFormat, formatSampleId, sampleIdFormat, nextSampleNumber, setNextSampleNumber,
 };
