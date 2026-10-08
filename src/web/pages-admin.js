@@ -12,6 +12,7 @@ const SETTING_LABELS = {
   supportEmail: 'Admin and support email',
   supportPhone: 'Support phone (in patient messages)',
   sampleIdPrefix: 'Sample ID prefix',
+  sampleIdFormat: 'Sample ID format ({PREFIX}, {YYYY} or {YY}, and the running number such as {N4})',
   companyGstin: 'MyDNAPedia GSTIN',
   companyAddress: 'Company address',
   companyLegalName: 'Company legal name (on invoices)',
@@ -55,6 +56,8 @@ ${tile('/audit', 'reports', 'Audit trail', 'Every change, who and when')}</div>
 })()}</div>
 <h2>Settings</h2><form method="post" action="/admin/settings" class="card"><div class="grid">
 ${Object.keys(SETTING_DEFAULTS).map((k) => field(SETTING_LABELS[k] || k, k, getSetting(db, k)))}
+${field('Next sample number (to continue your existing series)', 'sampleNextNumber', String(samples.nextSampleNumber(db)), { type: 'number', attrs: 'min="0" step="1"' })}
+<p class="muted" style="grid-column:1/-1;margin:0">The next sample will be <b class="mono">${samples.formatSampleId(samples.sampleIdFormat(db), getSetting(db, 'sampleIdPrefix'), istDate().slice(0, 4), samples.nextSampleNumber(db))}</b>. With the year in the format, the number starts again at 1 each new year.</p>
 </div><div class="actions"><button>Save settings</button></div></form>`);
   });
 
@@ -62,8 +65,10 @@ ${Object.keys(SETTING_DEFAULTS).map((k) => field(SETTING_LABELS[k] || k, k, getS
     onlyAdmin(ctx);
     const prefix = (ctx.body.sampleIdPrefix || '').trim().toUpperCase();
     if (!/^[A-Z]{2,5}$/.test(prefix)) throw new UserError('The sample ID prefix must be 2 to 5 letters.');
+    const format = 'sampleIdFormat' in ctx.body ? samples.checkFormat(ctx.body.sampleIdFormat) : null;
     if ('invoiceGstRate' in ctx.body && !['0', '5', '12', '18', '28'].includes(String(ctx.body.invoiceGstRate).trim())) throw new UserError('The GST rate must be 0, 5, 12, 18 or 28.');
-    for (const k of Object.keys(SETTING_DEFAULTS)) if (k in ctx.body) setSetting(db, k, k === 'sampleIdPrefix' ? prefix : String(ctx.body[k]).trim());
+    for (const k of Object.keys(SETTING_DEFAULTS)) if (k in ctx.body) setSetting(db, k, k === 'sampleIdPrefix' ? prefix : k === 'sampleIdFormat' ? format : String(ctx.body[k]).trim());
+    if (String(ctx.body.sampleNextNumber || '').trim() && Number(ctx.body.sampleNextNumber) !== samples.nextSampleNumber(db)) samples.setNextSampleNumber(db, ctx.body.sampleNextNumber);
     require('../util').audit(db, ctx.user.id, 'settings_changed', 'settings', null, ctx.body);
     h.redirect(ctx, '/admin', { type: 'ok', text: 'Settings saved.' });
   });

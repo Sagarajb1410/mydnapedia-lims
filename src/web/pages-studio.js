@@ -13,7 +13,7 @@ const STEPS = ['convert', 'form', 'plan'];
 module.exports = function (router, { db, storage }, h) {
   router.get('/studio', (ctx) => {
     if (!ROLES.includes(ctx.user.role)) throw new UserError('Report Centre is for MyDNAPedia staff and counsellors.');
-    const sample = /^[A-Za-z]{2,5}\d{2}-\d{6}$/.test(ctx.query.sample || '') ? ctx.query.sample.toUpperCase() : '';
+    const sample = /^[A-Za-z0-9-]{4,30}$/.test(ctx.query.sample || '') ? ctx.query.sample.toUpperCase() : '';
     if (sample) samples.load(db, ctx.user, sample);
     const step = STEPS.includes(ctx.query.step) ? ctx.query.step : (ctx.user.role === 'counsellor' ? 'form' : 'convert');
     const page = studio.page(db, storage, ctx.user, { sample, step });

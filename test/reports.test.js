@@ -40,9 +40,9 @@ function atPartner(db, lab) {
 const file = (lines) => ({ filename: 'x.pdf', data: pdfwrite.write([lines]) });
 
 test('text extraction handles simple fonts, Type0 fonts with ToUnicode and compressed streams', () => {
-  const simple = pdftext.extract(pdfwrite.write([['Hello (World) MDP26-000001'], ['Second page']]));
+  const simple = pdftext.extract(pdfwrite.write([['Hello (World) MDP00020260001'], ['Second page']]));
   assert.equal(simple.pages.length, 2);
-  assert.match(simple.pages[0].text, /Hello \(World\) MDP26-000001/);
+  assert.match(simple.pages[0].text, /Hello \(World\) MDP00020260001/);
   const chrome = pdftext.extract(fs.readFileSync(path.join(__dirname, 'fixtures', 'chrome-cid.pdf')));
   const flat = chrome.pages.map((p) => p.text).join(' ').replace(/\s+/g, '');
   assert.ok(flat.includes('AcmeGenomicsLabs'), 'Type0 text decoded');
@@ -95,7 +95,7 @@ test('the check blocks partner names, split names, metadata, the partner referen
   assert.equal(check(ok).ok, true);
   assert.match(check([...ok, 'Tested by ACME   genomics']).problems.join(), /Acme Genomics/);
   assert.match(check([...ok, 'Ref PLREF-7788']).problems.join(), /partner lab's own reference/);
-  assert.match(check(['Report Person MDP26-999999', ok[1]]).problems.join(), /does not show this sample's ID/);
+  assert.match(check(['Report Person MDP00020269999', ok[1]]).problems.join(), /does not show this sample's ID/);
   assert.match(check(ok, { author: 'AcmeGx' }).problems.join(), /file properties/);
   assert.match(check(ok, { producer: 'iText 5.5' }).problems.join(), /iText/);
   assert.match(check(['', '']).problems.join(), /No readable text/);

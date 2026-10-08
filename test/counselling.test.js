@@ -138,7 +138,7 @@ test('a plan for another client is blocked, and a no-show returns the client to 
   counselling.schedule(db, counsellor, s.sample_id, { when: future(), mode: 'In person' });
   counselling.sessionOutcome(db, counsellor, s.sample_id, { outcome: 'done' });
   counselling.saveForm(db, counsellor, s.sample_id, FORM, { complete: true });
-  const r = counselling.uploadPlan(db, store, counsellor, s.sample_id, { filename: 'p.pdf', type: 'application/pdf', data: pdfwrite.write([['Action plan for Somebody Else', 'MDP26-999999 long enough text for checking']]) });
+  const r = counselling.uploadPlan(db, store, counsellor, s.sample_id, { filename: 'p.pdf', type: 'application/pdf', data: pdfwrite.write([['Action plan for Somebody Else', 'MDP00020269999 long enough text for checking']]) });
   assert.match(r.check.problems.join(), /neither this sample's ID/);
 });
 

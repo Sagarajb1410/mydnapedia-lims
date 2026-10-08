@@ -29,7 +29,7 @@ function fresh() {
 test('only the right ID and mobile digits open the sample', () => {
   const { db, s } = fresh();
   assert.equal(track.lookup(db, s.sample_id, '9999'), null);
-  assert.equal(track.lookup(db, 'MDP99-999999', '1234'), null);
+  assert.equal(track.lookup(db, 'MDP00019999999', '1234'), null);
   assert.equal(track.lookup(db, s.sample_id, '123'), null);
   const v = track.lookup(db, ` ${s.sample_id.toLowerCase()} `, '1234');
   assert.equal(v.firstName, 'Asha');

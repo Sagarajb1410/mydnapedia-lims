@@ -100,10 +100,47 @@ function validatePatient(p) {
   return out;
 }
 
+// Sample IDs follow the admin's format: {PREFIX} the prefix, {YYYY} or {YY}
+// the year, {N4} the running number with 4 digits (any count from 3 to 9).
+// With a year in the format the number restarts each year.
+const FORMAT_RE = /^(?:[A-Z0-9-]|\{PREFIX\}|\{YYYY\}|\{YY\}|\{N[3-9]\})+$/;
+function checkFormat(format) {
+  const f = String(format || '').trim().toUpperCase();
+  if (!FORMAT_RE.test(f) || (f.match(/\{N[3-9]\}/g) || []).length !== 1) {
+    throw new UserError('The sample ID format may use letters, digits, dashes, {PREFIX}, {YYYY} or {YY}, and exactly one running number such as {N4}.');
+  }
+  return f;
+}
+function formatSampleId(format, prefix, year, n) {
+  return format.replace('{PREFIX}', prefix).replace('{YYYY}', year).replace('{YY}', year.slice(2))
+    .replace(/\{N(\d)\}/, (_, d) => String(n).padStart(Number(d), '0'));
+}
+// The counter the format uses: one per year when the year is in the ID.
+function counterName(format, year = istDate().slice(0, 4)) {
+  return /\{YY(YY)?\}/.test(format) ? `sample-${year}` : 'sample';
+}
+function sampleIdFormat(db) {
+  try { return checkFormat(getSetting(db, 'sampleIdFormat')); } catch { return '{PREFIX}{YY}-{N6}'; }
+}
+function nextSampleNumber(db) {
+  const row = db.get('SELECT value FROM counters WHERE name = ?', counterName(sampleIdFormat(db)));
+  return (row ? row.value : 0) + 1;
+}
+function setNextSampleNumber(db, next) {
+  const n = Number(next);
+  if (!Number.isInteger(n) || n < 0) throw new UserError('The next sample number must be a whole number.');
+  const name = counterName(sampleIdFormat(db));
+  db.run('INSERT INTO counters (name, value) VALUES (?, ?) ON CONFLICT(name) DO UPDATE SET value = excluded.value', name, n - 1);
+}
 function newSampleId(db) {
-  const yy = istDate().slice(2, 4);
-  const n = nextCounter(db, 'sample-' + yy);
-  return `${getSetting(db, 'sampleIdPrefix')}${yy}-${String(n).padStart(6, '0')}`;
+  const format = sampleIdFormat(db);
+  const year = istDate().slice(0, 4);
+  const prefix = getSetting(db, 'sampleIdPrefix');
+  // Skip any number already used (for example after the next number was set back).
+  for (;;) {
+    const id = formatSampleId(format, prefix, year, nextCounter(db, counterName(format, year)));
+    if (!db.get('SELECT id FROM samples WHERE sample_id = ?', id)) return id;
+  }
 }
 
 function addEvent(db, samplePk, from, to, userId, note) {
@@ -255,4 +292,5 @@ function cancel(db, user, sampleId, { reason, refundPaise }) {
 module.exports = {
   STATUSES, BEFORE_LAB, GENDERS, STATES, scope, canRegister, registeringAccount, validatePatient, findDuplicate,
   register, load, collect, canEditPatient, editPatient, cancel,
+  checkFormat, formatSampleId, sampleIdFormat, nextSampleNumber, setNextSampleNumber,
 };
