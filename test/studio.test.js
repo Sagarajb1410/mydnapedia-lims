@@ -9,12 +9,14 @@ const storage = require('../src/storage');
 const seed = require('../src/seed');
 const pdfwrite = require('../src/pdfwrite');
 const studio = require('../src/studio');
+const { FORM_PATCHES } = require('../src/studio-form');
 const { createApp } = require('../src/web/app');
 
 // A stand-in for the Report Studio file with the pieces the LIMS adjusts.
 const FAKE = `<!doctype html><html><head><title>Report Studio</title></head><body><input type="file" id="pick">
 <script>var app="mdp-report-studio";var cfg={lims:{url:"",key:"",afterReport:"none"},partnerTerms:["Zeta Labs","ZetaGx"]};
-${studio.LINK_PATCHES.map(([from]) => `/*${from}*/`).join('\n')}</script></body></html>`;
+${studio.LINK_PATCHES.map(([from]) => `/*${from}*/`).join('\n')}
+${FORM_PATCHES.map(([from]) => `/*${from}*/`).join('\n')}</script></body></html>`;
 
 async function withApp(fn) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lims-studio-'));
@@ -45,6 +47,7 @@ test('Report Centre is installed, renamed and linked to the LIMS', async () => {
     assert.match(page, /partnerTerms:\["Acme Genomics","AcmeGx"\]/, 'the admin\'s names are used');
     assert.match(page, /window\.__LIMS=\{"url":"\/studio\/api","key":"[0-9a-f]{64}","sample":"MDP00020260008","step":"convert"/);
     for (const [, to] of studio.LINK_PATCHES) assert.ok(page.includes(to));
+    assert.ok(page.includes('function mdpFormTables(r)'), 'counselling forms with a changed layout can be read');
     const partner = await signIn(base, 'sunrise@demo.example');
     assert.notStrictEqual((await fetch(`${base}/studio`, { headers: { cookie: partner }, redirect: 'manual' })).status, 200);
 

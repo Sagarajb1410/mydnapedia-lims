@@ -19,6 +19,7 @@ const samples = require('./samples');
 const reports = require('./reports');
 const counselling = require('./counselling');
 const form = require('./counselling-form');
+const { FORM_PATCHES } = require('./studio-form');
 const { nowIso, audit, UserError, getSetting } = require('./util');
 
 const STORE_KEY = 'studio/report-studio.html';
@@ -80,6 +81,8 @@ function base(db, storage) {
   let text = s.text.replace(TERMS_RE, `partnerTerms:${js(terms)}`);
   const linked = LINK_PATCHES.every(([from]) => text.includes(from));
   if (linked) for (const [from, to] of LINK_PATCHES) text = text.replace(from, () => to);
+  // Reads counselling forms whose layout was changed in Word (see studio-form.js).
+  if (FORM_PATCHES.every(([from]) => text.includes(from))) for (const [from, to] of FORM_PATCHES) text = text.replace(from, () => to);
   text = text.replace(/Report Studio/g, NAME);
   cache = { raw: s.text, terms: terms.join('|'), text, linked };
   return cache;
