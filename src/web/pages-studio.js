@@ -65,7 +65,7 @@ module.exports = function (router, { db, storage }, h) {
 
 // The heading shared by the three Report Centre pages.
 module.exports.head = function head(user, active, sub) {
-  const tabs = [['/reports', 'Reports', ['admin', 'lab']], ['/counselling', 'Counselling', ['admin', 'counsellor']], ['/plans', 'Action plans', ['admin', 'counsellor']]]
+  const tabs = [['/reports', 'Reports', ['admin', 'lab']], ['/counselling', 'Counselling', ['admin', 'counsellor']], ['/counselling/availability', 'Availability', ['admin', 'counsellor']], ['/plans', 'Action plans', ['admin', 'counsellor']]]
     .filter(([, , roles]) => roles.includes(user.role));
   return html`<div class="head"><div><h1>${studio.NAME}</h1><p class="sub">${sub}</p></div>
 <div class="actions" style="margin:0"><a class="btn" href="/studio" target="_blank" rel="noopener">${icon('reports')}Open ${studio.NAME}</a></div></div>

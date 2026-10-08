@@ -81,3 +81,26 @@ test('the public page works without sign-in and limits wrong guesses', async () 
     assert.equal((await post(s.sample_id, '1234')).status, 429);
   } finally { server.close(); }
 });
+
+test('a client books a counselling time from the public page', async () => {
+  const db = db_.open(':memory:');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lims-track-'));
+  const store = storage.localAdapter(dir);
+  seed.demo(db, store);
+  const s = db.get("SELECT s.sample_id, p.mobile FROM samples s JOIN patients p ON p.id = s.patient_id WHERE s.status = 'REPORT_RELEASED' LIMIT 1");
+  const m = s.mobile.slice(-4);
+  const server = createApp({ db, storage: store }).server();
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const form = (p, body) => fetch(`${base}${p}`, { method: 'POST', redirect: 'manual', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body });
+  try {
+    const page = await (await form('/track', `id=${s.sample_id}&m=${m}`)).text();
+    assert.match(page, /Choose your counselling time/);
+    const slot = page.match(/name="slot" value="(\d+)"/)[1];
+    const res = await form('/track/book', `id=${s.sample_id}&m=${m}&slot=${slot}`);
+    assert.equal(res.status, 200);
+    assert.match(await res.text(), /Booked for/);
+    assert.equal(db.get('SELECT status FROM counsellor_slots WHERE id = ?', Number(slot)).status, 'booked');
+    assert.equal((await form('/track/book', `id=${s.sample_id}&m=0000&slot=${slot}`)).status, 404);
+  } finally { server.close(); }
+});

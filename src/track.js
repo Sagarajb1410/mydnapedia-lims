@@ -33,7 +33,7 @@ const NOW = {
   RESULT_READY: 'Testing is complete. Your report is being prepared.',
   REPORT_WHITE_LABELLED: 'Our experts are reviewing your report.',
   REPORT_APPROVED: 'Your report has been approved and will be sent to you shortly.',
-  REPORT_RELEASED: 'Your report is ready and has been sent to your email. Our counsellor will contact you to book a session.',
+  REPORT_RELEASED: 'Your report is ready and has been sent to your email. Next, choose a time for your counselling session.',
   COUNSELLING_SCHEDULED: 'Your report is ready. Your counselling session is booked.',
   COUNSELLING_DONE: 'Counselling is done. Your personalised action plan is being prepared.',
   ACTION_PLAN_DRAFTED: 'Counselling is done. Your personalised action plan is being prepared.',
@@ -111,6 +111,9 @@ function view(db, s, now) {
     // 'stop' for hold or a new sample needed, 'off' when cancelled. The internal status is not shown.
     tone: stopped ? 'stop' : s.status === 'CANCELLED' ? 'off' : '',
     steps, eta, session,
+    // Used by the page to offer counselling times; not shown.
+    bookable: s.status === 'REPORT_RELEASED' || (s.status === 'COUNSELLING_SCHEDULED' && (!session || new Date(session.scheduled_at) - now > 12 * 3600000)),
+    counsellorId: s.counsellor_id || null,
     support: { phone: getSetting(db, 'supportPhone'), email: getSetting(db, 'supportEmail') },
   };
 }

@@ -235,7 +235,7 @@ const NAV = {
   admin: [['Overview', [['/', 'Dashboard', 'dashboard']]],
     ['Samples', [['/samples', 'Samples', 'samples'], ['/samples/new', 'Register', 'register']]],
     ['Lab', [['/tracking', 'Tracking', 'tracking']]],
-    ['Report Centre', [['/reports', 'Reports', 'reports'], ['/counselling', 'Counselling', 'counselling'], ['/plans', 'Action plans', 'plan']]],
+    ['Report Centre', [['/reports', 'Reports', 'reports'], ['/counselling', 'Counselling', 'counselling'], ['/counselling/availability', 'Availability', 'clock'], ['/plans', 'Action plans', 'plan']]],
     ['Business', [['/billing', 'Billing', 'billing'], ['/monthly', 'Monthly report', 'chart'], ['/outbox', 'Outbox', 'outbox']]],
     ['Settings', [['/admin', 'Admin', 'admin']]]],
   lab: [['Overview', [['/', 'Dashboard', 'dashboard']]],
@@ -244,7 +244,7 @@ const NAV = {
     ['Report Centre', [['/reports', 'Reports', 'reports']]],
     ['Messages', [['/outbox', 'Outbox', 'outbox']]]],
   partner: [['Your work', [['/samples', 'Registration', 'samples'], ['/samples/new', 'New sample', 'register'], ['/billing', 'Billing', 'billing']]]],
-  counsellor: [['Report Centre', [['/counselling', 'Counselling', 'counselling'], ['/plans', 'Action plans', 'plan']]], ['Clients', [['/samples', 'Clients', 'samples']]]],
+  counsellor: [['Report Centre', [['/counselling', 'Counselling', 'counselling'], ['/counselling/availability', 'My availability', 'clock'], ['/plans', 'Action plans', 'plan']]], ['Clients', [['/samples', 'Clients', 'samples']]]],
 };
 
 const ROLE_LABEL = { admin: 'Admin', lab: 'Lab staff', partner: 'B2B partner', counsellor: 'Counsellor' };

@@ -11,6 +11,7 @@ const notify = require('./notify');
 const pdftext = require('./pdftext');
 const doctext = require('./doctext');
 const samples = require('./samples');
+const track = require('./track');
 
 const SOURCE_FROM = {
   partner_lab: ['RECEIVED_AT_PARTNER', 'PARTNER_REPORT_RECEIVED'],
@@ -245,11 +246,11 @@ function release(db, storage, user, reportId) {
       code: 'N13', channel: 'email', recipient: p.email, recipientName: p.full_name, samplePk: s.id,
       attachmentKey: r.file_key, attachmentName: fileName,
       subject: `Your ${lab} report is ready`,
-      body: `Dear ${p.full_name},\n\nYour ${test.name} report (sample ${s.sample_id}) is ready and attached to this email.\n\nOur genetic counsellor will contact you to book your counselling session, where we explain your results and give you a personalised action plan.\n\nFor help, call ${getSetting(db, 'supportPhone')} or write to ${getSetting(db, 'supportEmail')}.\n\n${lab}`,
+      body: `Dear ${p.full_name},\n\nYour ${test.name} report (sample ${s.sample_id}) is ready and attached to this email.\n\nNext is your genetic counselling session, where we explain your results and give you a personalised action plan. Choose a time that suits you at ${track.link(s.sample_id)} (enter your sample ID and the last 4 digits of your mobile), or our counsellor will call you.\n\nFor help, call ${getSetting(db, 'supportPhone')} or write to ${getSetting(db, 'supportEmail')}.\n\n${lab}`,
     });
     notify.queue(db, {
       code: 'N13', channel: 'whatsapp', recipient: p.mobile, recipientName: p.full_name, samplePk: s.id,
-      body: `${lab}: Dear ${p.full_name}, your ${test.name} report (sample ${s.sample_id}) is ready. We have emailed it to you${p.email ? '' : ' (please share your email address)'}. Our counsellor will call you to book your counselling session.`,
+      body: `${lab}: Dear ${p.full_name}, your ${test.name} report (sample ${s.sample_id}) is ready. We have emailed it to you${p.email ? '' : ' (please share your email address)'}. Choose a time for your counselling session at ${track.link(s.sample_id)} (sample ID and last 4 digits of your mobile), or our counsellor will call you.`,
     });
     const account = db.get('SELECT * FROM accounts WHERE id = ?', s.account_id);
     if (account.type !== 'main') {

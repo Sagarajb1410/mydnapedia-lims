@@ -5,7 +5,7 @@ const { head: centreHead } = require('./pages-studio');
 const form = require('../counselling-form');
 const reports = require('../reports');
 const samples = require('../samples');
-const { fmtDateTime, fmtDate, UserError } = require('../util');
+const { fmtDateTime, fmtDate, UserError, istDate } = require('../util');
 
 const PLAN_STATUS = { blocked: 'Blocked', pending: 'Waiting for approval', rejected: 'Sent back', approved: 'Approved', delivered: 'Sent to client', superseded: 'Replaced' };
 const PLAN_TONE = { blocked: 'bad', rejected: 'bad', pending: 'warn', approved: 'good', delivered: 'good' };
@@ -46,12 +46,19 @@ ${select('How', 'mode', counselling.MODES, 'Video call', { required: true })}
 ${field('Meeting link', 'link', session && session.status === 'scheduled' ? session.meeting_link || '' : '', { opt: true, attrs: 'placeholder="https://meet.google.com/…"' })}
 ${user.role === 'admin' ? select('Counsellor', 'counsellor', cs.map((c) => [c.id, c.name]), s.counsellor_id || (cs[0] && cs[0].id), { required: true }) : ''}</div>
 <div class="actions"><button>${s.status === 'COUNSELLING_SCHEDULED' ? 'Rebook and message the client' : 'Book and message the client'}</button></div></form>`;
+    const slots = counselling.openSlots(db, user.role === 'counsellor' ? { counsellor_id: user.id } : s);
+    const slotLabel = (sl) => `${fmtDateTime(sl.starts_at)} · ${sl.minutes} min · ${sl.mode}${user.role === 'admin' ? ` · ${sl.counsellor_name}` : ''}`;
+    const slotForm = slots.length ? html`<form method="post" action="/samples/${s.sample_id}/counselling/book" class="noprint" style="margin-top:12px">
+<div class="grid">${select('Book an open slot', 'slot', slots.map((sl) => [sl.id, slotLabel(sl)]), '', { required: true })}
+${field('Meeting link', 'link', '', { opt: true, attrs: 'placeholder="https://meet.google.com/…"' })}</div>
+<div class="actions"><button>Book this slot and message the client</button></div></form>
+<p class="muted" style="margin:10px 0 0">Or book any other time:</p>` : html`<p class="muted" style="margin:12px 0 0">No open slots. <a href="/counselling/availability">Add availability</a> so clients can choose a time themselves, or book a time below.</p>`;
     return html`<div class="card"><h2 style="margin-top:0">Counselling</h2><dl class="facts">
 <dt>Report</dt><dd>${released ? html`<a href="/reports/${released.id}/file" target="_blank">Open the released report</a>` : '—'}${source && mayAct ? html` · <a href="/reports/${source.id}/file" target="_blank">partner's original</a>` : ''}</dd>
 ${session ? html`<dt>Session</dt><dd>${fmtDateTime(session.scheduled_at)} · ${session.mode} with ${session.counsellor_name}<br><span class="pill ${session.status === 'done' ? 'good' : session.status === 'no_show' ? 'bad' : ''}">${{ scheduled: 'Booked', done: 'Held', no_show: 'Did not attend', cancelled: 'Cancelled' }[session.status]}</span>${session.meeting_link ? html` <a href="${session.meeting_link}" target="_blank" rel="noopener">Meeting link</a>` : ''}</dd>` : ''}
 <dt>Counselling form</dt><dd>${f ? html`<span class="pill ${f.status === 'complete' ? 'good' : 'warn'}">${f.status === 'complete' ? 'Complete' : 'Draft'}</span> · updated ${fmtDateTime(f.updated_at)}` : 'Not started'}</dd></dl>
 ${!mayAct ? html`<p class="muted">This client is booked with another counsellor.</p>` : ''}
-${mayAct && ['REPORT_RELEASED', 'COUNSELLING_SCHEDULED'].includes(s.status) ? bookForm : ''}
+${mayAct && ['REPORT_RELEASED', 'COUNSELLING_SCHEDULED'].includes(s.status) ? html`${slotForm}${bookForm}` : ''}
 ${mayAct && s.status === 'COUNSELLING_SCHEDULED' ? html`<form method="post" action="/samples/${s.sample_id}/counselling/outcome" class="noprint" style="margin-top:12px;border-top:1px solid var(--line);padding-top:12px">
 <b>After the session</b><div style="margin-top:6px">${field('Note', 'note', '', { opt: true })}</div>
 <div class="actions"><button name="outcome" value="done">Session held</button><button class="light" name="outcome" value="no_show">Client did not attend</button></div></form>` : ''}
@@ -117,10 +124,64 @@ ${rows.length ? '' : html`<tr><td colspan="5" class="muted">${empty}</td></tr>`}
 <h2>Delivered (${q.delivered.length})</h2>${table(q.delivered, 'None yet.', ['Status', st])}`);
   });
 
+  // ---------- Availability ----------
+  const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  router.get('/counselling/availability', (ctx) => {
+    allowed(ctx);
+    const u = ctx.user;
+    const cs = counselling.counsellors(db);
+    const who = u.role === 'counsellor' ? u.id : Number(ctx.query.c) || null;
+    const list = counselling.upcomingSlots(db, who);
+    const days = new Map();
+    for (const sl of list) { const d = counselling.istDay(sl.starts_at); if (!days.has(d)) days.set(d, []); days.get(d).push(sl); }
+    const today = istDate();
+    const time = (iso) => new Intl.DateTimeFormat('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true }).format(new Date(iso));
+    const open = list.filter((x) => x.status === 'open').length;
+    h.send(ctx, 'Availability', html`${centreHead(u, '/counselling/availability', u.role === 'counsellor' ? 'Add the times you are free. Clients choose from them on their tracking page once their report is out.' : "Counsellors' free times. Clients choose from them on their tracking page once their report is out.")}
+<div class="card"><h2 style="margin-top:0">Add free times</h2>
+<form method="post" action="/counselling/availability">
+${u.role === 'admin' ? html`<div class="grid">${select('Counsellor', 'counsellor', cs.map((c) => [c.id, c.name]), who || (cs[0] && cs[0].id), { required: true })}</div>` : ''}
+<div class="grid">${field('Starting from', 'start', today, { type: 'date', required: true, attrs: `min="${today}"` })}
+${select('For', 'weeks', [['1', 'This week only'], ['2', '2 weeks'], ['3', '3 weeks'], ['4', '4 weeks']], '1', { required: true })}</div>
+<label style="margin-top:6px">Days</label><div style="display:flex;gap:14px;flex-wrap:wrap;margin:4px 0 10px">${WEEKDAYS.map((d, i) => html`<label style="font-weight:500;display:flex;gap:6px;align-items:center"><input type="checkbox" name="day[]" value="${i}" style="width:auto" ${i < 5 ? raw('checked') : ''}>${d}</label>`)}</div>
+<div class="grid">${field('From', 'from', '10:00', { type: 'time', required: true })}${field('To', 'to', '13:00', { type: 'time', required: true })}
+${select('Each session', 'minutes', counselling.SLOT_MINUTES.map((m) => [String(m), `${m} minutes`]), '45', { required: true })}
+${select('How', 'mode', counselling.MODES, 'Video call', { required: true })}</div>
+<div class="actions"><button>Add these times</button></div></form></div>
+<div class="card"><div class="head" style="margin-bottom:8px"><div><h2 style="margin:0">Coming up</h2><p class="sub">${open} open · ${list.length - open} booked</p></div>
+${u.role === 'admin' ? html`<form method="get" style="margin:0;min-width:220px">${select('Show', 'c', [['', 'All counsellors'], ...cs.map((c) => [String(c.id), c.name])], who ? String(who) : '', {})}<noscript><button class="light small">Show</button></noscript></form>` : ''}</div>
+${days.size ? [...days].map(([d, slots]) => html`<h3 style="margin:16px 0 8px;font-size:14px">${fmtDate(d)} · ${new Intl.DateTimeFormat('en-IN', { weekday: 'long', timeZone: 'Asia/Kolkata' }).format(new Date(slots[0].starts_at))}</h3>
+<div style="display:flex;flex-wrap:wrap;gap:8px">${slots.map((sl) => sl.status === 'booked'
+    ? html`<span class="pill good" title="${sl.mode}">${time(sl.starts_at)} · <a href="/samples/${sl.sample_id}">${sl.full_name || 'Booked'}</a>${u.role === 'admin' && !who ? ` · ${sl.counsellor_name}` : ''}</span>`
+    : html`<form method="post" action="/counselling/availability/${sl.id}/remove" style="margin:0"><span class="pill" title="${sl.mode}">${time(sl.starts_at)} · ${sl.minutes} min${u.role === 'admin' && !who ? ` · ${sl.counsellor_name}` : ''}
+<button class="linkbtn" title="Remove this time" aria-label="Remove this time" style="background:none;border:0;padding:0 0 0 4px;color:var(--quiet);cursor:pointer;min-height:0;font-weight:700">×</button></span></form>`)}</div>`)
+    : html`<div class="empty">No free times added yet.</div>`}</div>
+<script>document.querySelectorAll('select[name=c]').forEach(function(s){s.onchange=function(){s.form.submit()}})</script>`);
+  });
+  router.post('/counselling/availability', (ctx) => {
+    allowed(ctx);
+    const b = ctx.body;
+    const picked = [].concat(b.day || []).map(Number);
+    const weeks = Math.min(Math.max(Number(b.weeks) || 1, 1), 4);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(b.start || '')) throw new UserError('Choose the starting date.');
+    const dates = [];
+    for (let i = 0; i < weeks * 7; i++) {
+      const d = new Date(Date.parse(`${b.start}T00:00:00Z`) + i * 86400000);
+      if (picked.includes((d.getUTCDay() + 6) % 7)) dates.push(d.toISOString().slice(0, 10));
+    }
+    const n = counselling.addSlots(db, ctx.user, { counsellorId: b.counsellor, dates, from: b.from, to: b.to, minutes: b.minutes, mode: b.mode });
+    h.redirect(ctx, `/counselling/availability${ctx.user.role === 'admin' && b.counsellor ? `?c=${b.counsellor}` : ''}`, { type: n ? 'ok' : 'warn', text: n ? `${n} free ${n === 1 ? 'time' : 'times'} added.` : 'No new times were added (they were already there, or in the past).' });
+  });
+  router.post('/counselling/availability/:slot/remove', (ctx) => {
+    allowed(ctx);
+    counselling.removeSlot(db, ctx.user, ctx.params.slot);
+    h.redirect(ctx, '/counselling/availability', { type: 'ok', text: 'That time was removed.' });
+  });
+
   // ---------- Booking and outcome ----------
   router.post('/samples/:id/counselling/book', (ctx) => {
     loadSample(ctx);
-    counselling.schedule(db, ctx.user, ctx.params.id, { when: ctx.body.when, mode: ctx.body.mode, link: ctx.body.link, counsellorId: ctx.body.counsellor });
+    counselling.schedule(db, ctx.user, ctx.params.id, { slotId: ctx.body.slot, when: ctx.body.when, mode: ctx.body.mode, link: ctx.body.link, counsellorId: ctx.body.counsellor });
     h.redirect(ctx, `/samples/${ctx.params.id}`, { type: 'ok', text: 'Session booked. The client\'s WhatsApp and email are waiting in the outbox.' });
   });
   router.post('/samples/:id/counselling/outcome', (ctx) => {

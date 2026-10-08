@@ -332,6 +332,22 @@ const MIGRATIONS = [
   );
   CREATE INDEX studio_docs_sample ON studio_docs(sample_pk);
   `,
+  // 6: counsellors' open slots, which patients or staff book
+  `
+  CREATE TABLE counsellor_slots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    counsellor_id INTEGER NOT NULL REFERENCES users(id),
+    starts_at TEXT NOT NULL,
+    minutes INTEGER NOT NULL,
+    mode TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('open','booked','removed')),
+    session_id INTEGER REFERENCES counselling_sessions(id),
+    created_by INTEGER REFERENCES users(id),
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX counsellor_slots_time ON counsellor_slots(status, starts_at);
+  CREATE UNIQUE INDEX counsellor_slots_one ON counsellor_slots(counsellor_id, starts_at) WHERE status != 'removed';
+  `,
 ];
 
 // Audit rows must never change: block UPDATE and DELETE at database level.

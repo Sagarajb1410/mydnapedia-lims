@@ -157,3 +157,44 @@ test('counsellors see only counselling-stage clients, their own or unassigned, a
   assert.equal(reports.canOpen(counsellor, src, db.get('SELECT * FROM samples WHERE id = ?', s.id)), false);
   assert.equal(reports.canOpen({ ...counsellor, id: other }, src, db.get('SELECT * FROM samples WHERE id = ?', s.id)), true);
 });
+
+test('counsellor availability: slots, staff booking, patient booking, rebooking frees the old slot', () => {
+  const { db, s, admin, counsellor } = fresh();
+  const day = new Date(Date.now() + 3 * 86400000 + 5.5 * 3600000).toISOString().slice(0, 10);
+  const before = db.get("SELECT COUNT(*) AS n FROM counsellor_slots WHERE counsellor_id = ? AND status = 'open'", counsellor.id).n;
+  const added = counselling.addSlots(db, counsellor, { dates: [day], from: '15:00', to: '17:00', minutes: '30', mode: 'Phone call' });
+  assert.equal(added, 4);
+  // Adding the same hours again adds nothing.
+  assert.equal(counselling.addSlots(db, counsellor, { dates: [day], from: '15:00', to: '17:00', minutes: '30', mode: 'Phone call' }), 0);
+  assert.throws(() => counselling.addSlots(db, counsellor, { dates: [day], from: '17:00', to: '15:00', minutes: '30', mode: 'Phone call' }), /start time/);
+  const mine = db.all("SELECT * FROM counsellor_slots WHERE counsellor_id = ? AND status = 'open' AND starts_at >= ? ORDER BY starts_at", counsellor.id, new Date(`${day}T15:00:00+05:30`).toISOString()).slice(0, 4);
+  assert.equal(db.get("SELECT COUNT(*) AS n FROM counsellor_slots WHERE counsellor_id = ? AND status = 'open'", counsellor.id).n, before + 4);
+
+  // The patient sees open times and books one.
+  const open = counselling.openSlots(db, s);
+  assert.ok(open.some((x) => x.id === mine[0].id));
+  const b = counselling.bookByPatient(db, s.sample_id, mine[0].id);
+  assert.equal(b.when, mine[0].starts_at);
+  assert.equal(status(db, s), 'COUNSELLING_SCHEDULED');
+  assert.equal(db.get('SELECT status FROM counsellor_slots WHERE id = ?', mine[0].id).status, 'booked');
+  assert.ok(!counselling.openSlots(db, s).some((x) => x.id === mine[0].id));
+
+  // Moving to another time frees the first one.
+  counselling.bookByPatient(db, s.sample_id, mine[1].id);
+  assert.equal(db.get('SELECT status FROM counsellor_slots WHERE id = ?', mine[0].id).status, 'open');
+  assert.equal(db.get('SELECT status FROM counsellor_slots WHERE id = ?', mine[1].id).status, 'booked');
+  assert.equal(db.get("SELECT COUNT(*) AS n FROM counselling_sessions WHERE sample_pk = ? AND status = 'scheduled'", s.id).n, 1);
+
+  // A booked time cannot be taken twice, and cannot be removed.
+  const other = db.get("SELECT * FROM samples WHERE status = 'REPORT_RELEASED' AND id != ? LIMIT 1", s.id);
+  if (other) assert.throws(() => counselling.schedule(db, admin, other.sample_id, { slotId: mine[1].id }), UserErrorLike);
+  assert.throws(() => counselling.removeSlot(db, counsellor, mine[1].id), UserErrorLike);
+  counselling.removeSlot(db, counsellor, mine[2].id);
+  assert.equal(db.get('SELECT status FROM counsellor_slots WHERE id = ?', mine[2].id).status, 'removed');
+
+  // Staff can book an open slot from the sample page too.
+  counselling.schedule(db, admin, s.sample_id, { slotId: mine[3].id });
+  assert.equal(db.get('SELECT status FROM counsellor_slots WHERE id = ?', mine[3].id).status, 'booked');
+  assert.equal(db.get('SELECT status FROM counsellor_slots WHERE id = ?', mine[1].id).status, 'open');
+});
+const UserErrorLike = (e) => e.name === 'UserError' || e.constructor.name === 'UserError';
