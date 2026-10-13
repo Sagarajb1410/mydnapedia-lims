@@ -182,3 +182,24 @@ test('Fitness and Cardiac reports carry their own name, from the sample\'s test'
     assert.strictEqual(await product('MDP360P'), null);
   });
 });
+
+test('each action plan fits its own test', () => {
+  const { scopePlan } = require('../src/studio-plan');
+  const sec = (k, title) => `{t:"section",kicker:"${k}",title:"${title}"},{t:"bullets",items:[1]}`;
+  const tool = `(function(e){let t=e.AP={};function d(_){let m=_.client,p={},L=[],$=L.length>=3||!!p.skinComplaints,y=m.tier||"360 Premium";
+let v=[{t:"title",text:y+" Post-Test Plan",sub:"all"},{t:"p",text:"It turns your report into day-to-day steps for nutrition, fitness and more."},
+${sec('Section A', 'Nutrition Action Plan')},${sec('Section B', 'Fitness & Physical Activity Plan')},${sec('Section C', 'Mental Wellbeing Plan')},${sec('Section D', 'Prevention of Risks')}];
+$&&v.push({t:"section",kicker:"Section E",title:"Skin Health"});v.push({t:"section",kicker:"For your doctor",title:"Note for Your Physician \\u2014 Medicines"},{t:"section",kicker:"What to do now",title:"Next Steps"},{t:"closing",text:"Bye"});
+return{blocks:v,includeSkin:$}}t.generate=d,t.fileName=0})(G)`;
+  const G = {};
+  new Function('G', scopePlan(tool))(G);
+  const plan = (tier) => G.AP.generate({ client: { tier } }).blocks;
+  const sections = (tier) => plan(tier).filter((b) => b.t === 'section').map((b) => `${b.kicker}: ${b.title.split(' —')[0]}`);
+  assert.deepStrictEqual(sections('Cardiac Health'), ['Section A: Nutrition Action Plan', 'Section B: Fitness & Physical Activity Plan', 'Section C: Mental Wellbeing Plan', 'Section D: Prevention of Risks', 'For your doctor: Note for Your Physician', 'What to do now: Next Steps']);
+  assert.ok(!sections('Fitness').some((s) => s.includes('Physician')), 'fitness reports have no medicines section');
+  assert.deepStrictEqual(sections('Skin Health'), ['Section A: Nutrition Action Plan', 'Section B: Prevention of Risks', 'Section C: Skin Health', 'What to do now: Next Steps']);
+  const skin = plan('Skin Health');
+  assert.strictEqual(skin.find((b) => b.t === 'title').sub, 'Nutrition  •  Prevention of Risks  •  Skin Health');
+  assert.match(skin.find((b) => b.t === 'p').text, /steps for nutrition, prevention of risks and skin health\./);
+  assert.strictEqual(skin.at(-1).t, 'closing');
+});

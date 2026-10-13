@@ -20,6 +20,7 @@ const reports = require('./reports');
 const counselling = require('./counselling');
 const form = require('./counselling-form');
 const { patchForm } = require('./studio-form');
+const { scopePlan } = require('./studio-plan');
 const { nowIso, audit, UserError, getSetting } = require('./util');
 
 // Two copies of the tool: the main one (360 Premium, Fitness, Cardiac) and the
@@ -135,6 +136,8 @@ function base(db, storage, tool = 'main') {
   if (linked) for (const [re, to] of LINK_PATCHES) text = text.replace(re, to);
   // Reads counselling forms whose layout was changed in Word (see studio-form.js).
   text = patchForm(text);
+  // Each action plan fits its own test (see studio-plan.js).
+  text = scopePlan(text);
   if (tool === 'main') text = useProduct(guardSkin(text));
   text = text.replace(/Report Studio/g, NAME).replace(/<title>Skin Health Studio<\/title>/, `<title>${NAME} · Skin Health</title>`);
   const out = { raw: s.text, terms: terms.join('|'), text, linked };
