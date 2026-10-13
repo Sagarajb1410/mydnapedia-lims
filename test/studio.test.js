@@ -153,10 +153,14 @@ test('a skin sample opens the Skin Health copy for converting', async () => {
 
 test('the main copy refuses a skin report instead of labelling it 360 Premium', () => {
   const code = studio.guardSkin('function qa(r){let d={},c=!1;return{pages:r,fields:d,converted:c}}');
-  const qa = new Function(`${code};return qa`)();
+  const qa = new Function('window', `${code};return qa`)({});
   const page = (...lines) => ({ body: lines.map((text) => ({ text })) });
   assert.throws(() => qa([page('Skin Damage', 'x'), page(' Hair Care ')]), /Skin Health report/);
   assert.deepStrictEqual(qa([page('Nutrition'), page('Hair Care')]).converted, false, 'one skin-like heading is not enough');
+  const win = { __LIMS: { sample: 'MDP00020260008', skin: true }, location: {} };
+  const onSample = new Function('window', 'location', `${code};return qa`)(win, win.location);
+  assert.throws(() => onSample([page('Skin Damage'), page('Hair Care')]), /Opening Skin Health Studio/);
+  assert.strictEqual(win.location.href, '/studio?sample=MDP00020260008&step=convert&tool=skin', 'it hands over to the Skin Health copy');
 });
 
 test('Fitness and Cardiac reports carry their own name, from the sample\'s test', async () => {

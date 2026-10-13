@@ -52,7 +52,9 @@ const SKIN_HEADINGS = /^(Skin Texture and Aging|Skin Damage|Hair Care|Skin Nutri
 const ANALYSE_RE = /return\{pages:([\w$]+),fields:([\w$]+),converted:([\w$]+)\}\}/;
 const SKIN_REFUSAL = 'This is a Skin Health report. Convert it in Skin Health Studio: open it from the client\'s Skin Health sample in the LIMS, or use the Skin Health button on the Reports screen.';
 function guardSkin(text) {
-  return text.replace(ANALYSE_RE, (m, pages) => `if(new Set(${pages}.flatMap(x=>(x.body||[]).map(g=>String(g.text||"").trim()).filter(g=>${SKIN_HEADINGS}.test(g)))).size>=2)throw new Error(${JSON.stringify(SKIN_REFUSAL)});${m}`);
+  // Opened on a sample, it hands over to the Skin Health copy, which loads the partner's PDF itself.
+  const handOver = 'if(window.__LIMS&&window.__LIMS.sample&&window.__LIMS.skin&&!window.__mdpSkinGo){window.__mdpSkinGo=1;location.href="/studio?sample="+encodeURIComponent(window.__LIMS.sample)+"&step=convert&tool=skin";throw new Error("This is a Skin Health report. Opening Skin Health Studio\u2026")}';
+  return text.replace(ANALYSE_RE, (m, pages) => `if(new Set(${pages}.flatMap(x=>(x.body||[]).map(g=>String(g.text||"").trim()).filter(g=>${SKIN_HEADINGS}.test(g)))).size>=2){${handOver}throw new Error(${JSON.stringify(SKIN_REFUSAL)})}${m}`);
 }
 
 // The main copy brands every report "MDP 360 PREMIUM" unless it recognises the
@@ -177,7 +179,7 @@ function page(db, storage, user, { sample, step, tool } = {}) {
   const b = base(db, storage, toolFor(db, storage, user, sample, step, tool));
   if (!b) return null;
   const head = b.linked
-    ? `<script>window.__LIMS=${js({ url: '/studio/api', key: keyFor(db, user), sample: sample || '', step: step || '', role: user.role, results: hasResults(db, storage, user, sample), product: productFor(db, sample) })};</script>`
+    ? `<script>window.__LIMS=${js({ url: '/studio/api', key: keyFor(db, user), sample: sample || '', step: step || '', role: user.role, results: hasResults(db, storage, user, sample), product: productFor(db, sample), skin: Boolean(source(storage, 'skin')) })};</script>`
     : '';
   const tail = b.linked && sample ? `<script>${OPENER}</script>` : '';
   return b.text.replace('<head>', () => `<head>${head}`).replace('</body>', () => `${tail}</body>`);
