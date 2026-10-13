@@ -3,8 +3,11 @@
 // fifth), so a form whose layout was updated in Word was refused. Before
 // serving the tool, the LIMS swaps in a reader that finds each part of the form
 // by its heading (A3, A4, B, C, E1, E2, E4 ...) and ignores added sections.
-// If a new version of the tool changes these pieces, the swap is skipped.
-const FIND = "let n=Mm(r),i=n.findIndex(R=>R[0]&&/parameter/i.test(R[0][0]||\"\")&&R[0].some(B=>/response/i.test(B)));if(n.length!==18||i!==4)throw new Error(\"This document is not the MyDNAPedia counselling form (or its tables were changed), so it cannot be read.\");";
+// The tool is minified, so its own names differ between builds (the 360 and
+// Skin Health copies); the pieces are found by their shape, not their names.
+// If a new version of the tool changes them, the swap is skipped.
+const FIND = /let n=([\w$]+)\(r\),i=n\.findIndex\(R=>R\[0\]&&\/parameter\/i\.test\(R\[0\]\[0\]\|\|""\)&&R\[0\]\.some\(B=>\/response\/i\.test\(B\)\)\);if\(n\.length!==18\|\|i!==4\)throw new Error\("[^"]*"\);/;
+const READ_DOCX = /async function [\w$]+\(e\)\{let t,r;try\{t=await [\w$]+\.default\.loadAsync\(e\)/;
 
 const READER = String.raw`function mdpFormTables(r){
 let body=r.slice(Math.max(0,r.indexOf("<w:body")));
@@ -15,7 +18,7 @@ while(m=re.exec(body)){
   let xml=body.slice(m.index,end),flat="<w:tbl>"+xml.slice(7,-8).replace(/<w:tbl>[\s\S]*?<\/w:tbl>/g,y=>y.slice(7,-8).replace(/<\/?w:t(r|c|blPr|blGrid)\b[^>]*>/g,""))+"</w:tbl>";
   /* Word may wrap cells in content controls, or add attributes to rows and cells. */
   flat=flat.replace(/<w:tc [^>]*>/g,"<w:tc>");
-  let rows=Mm(flat)[0]||[];items.push({t:rows,txt:rows.flat().join(" ")});re.lastIndex=end}
+  let rows=__TABLES__(flat)[0]||[];items.push({t:rows,txt:rows.flat().join(" ")});re.lastIndex=end}
  else{let txt=(m[0].match(/<w:t(?:\s[^>]*)?>[^<]*/g)||[]).map(y=>y.replace(/<w:t[^>]*>/,"")).join("").replace(/&amp;/g,"&");if(txt.trim())items.push({p:txt})}
 }
 let T=items.filter(x=>x.t).map(x=>x.t);
@@ -46,9 +49,13 @@ if(!n[4][0])n[4]=[[]];
 return n}
 `;
 
-const FORM_PATCHES = [
-  [FIND, 'let n=mdpFormTables(r);'],
-  ['async function vc(e){let t,r;', READER.replace(/\n/g, '') + 'async function vc(e){let t,r;'],
-];
+function patchForm(text) {
+  const m = FIND.exec(text);
+  const at = READ_DOCX.exec(text);
+  if (!m || !at) return text;
+  const reader = READER.replace(/\n/g, '').replace('__TABLES__', () => m[1]);
+  text = text.replace(FIND, 'let n=mdpFormTables(r);');
+  return text.replace(READ_DOCX, (x) => reader + x);
+}
 
-module.exports = { FORM_PATCHES };
+module.exports = { patchForm };

@@ -19,30 +19,55 @@ const samples = require('./samples');
 const reports = require('./reports');
 const counselling = require('./counselling');
 const form = require('./counselling-form');
-const { FORM_PATCHES } = require('./studio-form');
+const { patchForm } = require('./studio-form');
 const { nowIso, audit, UserError, getSetting } = require('./util');
 
-const STORE_KEY = 'studio/report-studio.html';
-const FILE = path.resolve(__dirname, '..', 'studio', 'report-studio.html');
+// Two copies of the tool: the main one (360 Premium, Fitness, Cardiac) and the
+// Skin Health one, which brands, words and checks skin reports as Skin Health.
+// Samples of a skin test open the Skin Health copy for converting.
+const TOOLS = {
+  main: { key: 'studio/report-studio.html', file: path.resolve(__dirname, '..', 'studio', 'report-studio.html'), label: 'Report Studio' },
+  skin: { key: 'studio/skin-health-studio.html', file: path.resolve(__dirname, '..', 'studio', 'skin-health-studio.html'), label: 'Skin Health Studio' },
+};
 const NAME = 'Report Centre';
 
-// Exact pieces of the tool's code that the LIMS adjusts. If a new version of
-// the tool changes them, linking is switched off and the admin is told.
+// Pieces of the tool's code that the LIMS adjusts so its LIMS tab talks to this
+// LIMS. The tool is minified, so they are found by shape, not by name. If a new
+// version changes them, linking is switched off and the admin is told.
 const LINK_PATCHES = [
-  ['$o=e=>!!(e?.lims?.url&&e?.lims?.key)', '$o=e=>!!(window.__LIMS||e?.lims?.url&&e?.lims?.key)'],
-  ['let r=o2(e.lims.url);if(r)throw new Error(r);', 'let r=window.__LIMS?"":o2(e.lims.url);if(r)throw new Error(r);'],
-  ['fetch(e.lims.url.trim(),', 'fetch((window.__LIMS?window.__LIMS.url:e.lims.url).trim(),'],
-  ['key:e.lims.key.trim()', 'key:(window.__LIMS?window.__LIMS.key:e.lims.key).trim()'],
+  [/([\w$]+)=e=>!!\(e\?\.lims\?\.url&&e\?\.lims\?\.key\)/, (m, f) => `${f}=e=>!!(window.__LIMS||e?.lims?.url&&e?.lims?.key)`],
+  [/let r=([\w$]+)\(e\.lims\.url\);if\(r\)throw new Error\(r\);/, (m, f) => `let r=window.__LIMS?"":${f}(e.lims.url);if(r)throw new Error(r);`],
+  [/fetch\(e\.lims\.url\.trim\(\),/, () => 'fetch((window.__LIMS?window.__LIMS.url:e.lims.url).trim(),'],
+  [/key:e\.lims\.key\.trim\(\)/, () => 'key:(window.__LIMS?window.__LIMS.key:e.lims.key).trim()'],
 ];
 const TERMS_RE = /partnerTerms:\[[^\]]*\]/;
+// The Skin Health copy adds its own partner product names in code.
+const EXTRA_TERMS_RE = /partnerTerms=\[\.\.\.t\.partnerTerms(?:,"[^"]*")*\]/g;
+
+// The main copy reads any partner report as 360 Premium. A skin report (two or
+// more of its section headings) is refused there with a pointer to the Skin
+// Health copy, instead of coming out labelled 360 Premium.
+const SKIN_HEADINGS = /^(Skin Texture and Aging|Skin Damage|Hair Care|Skin Nutrition|Skin Inflammation)$/;
+const ANALYSE_RE = /return\{pages:([\w$]+),fields:([\w$]+),converted:([\w$]+)\}\}/;
+const SKIN_REFUSAL = 'This is a Skin Health report. Convert it in Skin Health Studio: open it from the client\'s Skin Health sample in the LIMS, or use the Skin Health button on the Reports screen.';
+function guardSkin(text) {
+  return text.replace(ANALYSE_RE, (m, pages) => `if(new Set(${pages}.flatMap(x=>(x.body||[]).map(g=>String(g.text||"").trim()).filter(g=>${SKIN_HEADINGS}.test(g)))).size>=2)throw new Error(${JSON.stringify(SKIN_REFUSAL)});${m}`);
+}
+
+const linkable = (text) => LINK_PATCHES.every(([re]) => re.test(text));
 
 function looksLikeStudio(text) {
   return text.includes('mdp-report-studio') && TERMS_RE.test(text) && text.includes('id="pick"');
 }
 
+// Which copy a file is.
+function toolOf(text) {
+  return /<title>Skin Health Studio<\/title>/.test(text) ? 'skin' : 'main';
+}
+
 // The built-in partner names are taken out before the file is stored.
 function scrub(text) {
-  return text.replace(TERMS_RE, 'partnerTerms:[]');
+  return text.replace(TERMS_RE, 'partnerTerms:[]').replace(EXTRA_TERMS_RE, 'partnerTerms=[...t.partnerTerms]');
 }
 
 function install(db, storage, user, file) {
@@ -50,42 +75,60 @@ function install(db, storage, user, file) {
   const text = file && file.data ? file.data.toString('utf8') : '';
   if (!looksLikeStudio(text)) throw new UserError('That file is not the Report Studio HTML file.');
   const clean = scrub(text);
-  storage.put(STORE_KEY, Buffer.from(clean, 'utf8'));
-  const linked = LINK_PATCHES.every(([from]) => clean.includes(from));
-  audit(db, user.id, 'report_centre_installed', 'settings', null, { size: clean.length, linked });
-  cache = null;
-  return { linked };
+  const tool = toolOf(clean);
+  storage.put(TOOLS[tool].key, Buffer.from(clean, 'utf8'));
+  const linked = linkable(clean);
+  audit(db, user.id, 'report_centre_installed', 'settings', null, { tool, size: clean.length, linked });
+  cache.delete(tool);
+  return { linked, tool: TOOLS[tool].label };
 }
 
-let cache = null; // { source, base, linked, terms }
+const cache = new Map(); // tool -> { raw, terms, text, linked }
 
-function source(storage) {
-  if (storage.exists(STORE_KEY)) return { from: 'installed', text: storage.get(STORE_KEY).toString('utf8') };
-  if (fs.existsSync(FILE)) return { from: 'bundled', text: scrub(fs.readFileSync(FILE, 'utf8')) };
+function source(storage, tool = 'main') {
+  const t = TOOLS[tool];
+  if (storage.exists(t.key)) return { from: 'installed', text: storage.get(t.key).toString('utf8') };
+  if (fs.existsSync(t.file)) return { from: 'bundled', text: scrub(fs.readFileSync(t.file, 'utf8')) };
   return null;
 }
 
+// { main: {...}, skin: {...} }, each { installed, from, linked, label }.
 function status(storage) {
-  const s = source(storage);
-  if (!s) return { installed: false };
-  return { installed: true, from: s.from, linked: LINK_PATCHES.every(([from]) => s.text.includes(from)) };
+  const out = {};
+  for (const tool of Object.keys(TOOLS)) {
+    const s = source(storage, tool);
+    out[tool] = s ? { installed: true, from: s.from, linked: linkable(s.text), label: TOOLS[tool].label } : { installed: false, label: TOOLS[tool].label };
+  }
+  return out;
 }
 
 const js = (v) => JSON.stringify(v).replace(/</g, '\\u003c');
 
-function base(db, storage) {
+function base(db, storage, tool = 'main') {
   const terms = reports.leakTerms(db);
-  const s = source(storage);
+  const s = source(storage, tool);
   if (!s) return null;
-  if (cache && cache.raw === s.text && cache.terms === terms.join('|')) return cache;
+  const hit = cache.get(tool);
+  if (hit && hit.raw === s.text && hit.terms === terms.join('|')) return hit;
   let text = s.text.replace(TERMS_RE, `partnerTerms:${js(terms)}`);
-  const linked = LINK_PATCHES.every(([from]) => text.includes(from));
-  if (linked) for (const [from, to] of LINK_PATCHES) text = text.replace(from, () => to);
+  const linked = linkable(text);
+  if (linked) for (const [re, to] of LINK_PATCHES) text = text.replace(re, to);
   // Reads counselling forms whose layout was changed in Word (see studio-form.js).
-  if (FORM_PATCHES.every(([from]) => text.includes(from))) for (const [from, to] of FORM_PATCHES) text = text.replace(from, () => to);
-  text = text.replace(/Report Studio/g, NAME);
-  cache = { raw: s.text, terms: terms.join('|'), text, linked };
-  return cache;
+  text = patchForm(text);
+  if (tool === 'main') text = guardSkin(text);
+  text = text.replace(/Report Studio/g, NAME).replace(/<title>Skin Health Studio<\/title>/, `<title>${NAME} · Skin Health</title>`);
+  const out = { raw: s.text, terms: terms.join('|'), text, linked };
+  cache.set(tool, out);
+  return out;
+}
+
+// The copy to open: the Skin Health one for converting a skin test's report,
+// when it is installed; the main one otherwise.
+function toolFor(db, storage, user, sampleId, step, asked) {
+  if (asked === 'skin' && source(storage, 'skin')) return 'skin';
+  if (!sampleId || step === 'form' || step === 'plan') return 'main';
+  const t = db.get('SELECT t.code, t.name FROM samples s JOIN tests t ON t.id = s.test_id WHERE s.sample_id = ?', sampleId);
+  return t && /skin/i.test(`${t.code} ${t.name}`) && source(storage, 'skin') ? 'skin' : 'main';
 }
 
 // A sign-in key for the tool, valid as long as a normal sign-in.
@@ -107,8 +150,8 @@ function hasResults(db, storage, user, sampleId) {
 }
 
 // The page for one person, optionally opened on one sample.
-function page(db, storage, user, { sample, step } = {}) {
-  const b = base(db, storage);
+function page(db, storage, user, { sample, step, tool } = {}) {
+  const b = base(db, storage, toolFor(db, storage, user, sample, step, tool));
   if (!b) return null;
   const head = b.linked
     ? `<script>window.__LIMS=${js({ url: '/studio/api', key: keyFor(db, user), sample: sample || '', step: step || '', role: user.role, results: hasResults(db, storage, user, sample) })};</script>`
@@ -275,4 +318,4 @@ function api(db, storage, req) {
   throw new UserError('Unknown request.');
 }
 
-module.exports = { install, status, page, api, docs, scrub, looksLikeStudio, NAME, LINK_PATCHES };
+module.exports = { install, status, page, api, docs, scrub, looksLikeStudio, toolOf, guardSkin, NAME, LINK_PATCHES, TOOLS };

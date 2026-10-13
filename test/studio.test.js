@@ -10,14 +10,20 @@ const seed = require('../src/seed');
 const pdfwrite = require('../src/pdfwrite');
 const studio = require('../src/studio');
 const counselling = require('../src/counselling');
-const { FORM_PATCHES } = require('../src/studio-form');
 const { createApp } = require('../src/web/app');
+
+// Tests use only the copies they install, not files sitting in studio/.
+for (const t of Object.values(studio.TOOLS)) t.file = path.join(os.tmpdir(), 'lims-test-no-such-studio.html');
 
 // A stand-in for the Report Studio file with the pieces the LIMS adjusts.
 const FAKE = `<!doctype html><html><head><title>Report Studio</title></head><body><input type="file" id="pick">
 <script>var app="mdp-report-studio";var cfg={lims:{url:"",key:"",afterReport:"none"},partnerTerms:["Zeta Labs","ZetaGx"]};
-${studio.LINK_PATCHES.map(([from]) => `/*${from}*/`).join('\n')}
-${FORM_PATCHES.map(([from]) => `/*${from}*/`).join('\n')}</script></body></html>`;
+/*$o=e=>!!(e?.lims?.url&&e?.lims?.key)*/
+/*let r=o2(e.lims.url);if(r)throw new Error(r);*/
+/*fetch(e.lims.url.trim(),*/
+/*key:e.lims.key.trim()*/
+/*let n=Mm(r),i=n.findIndex(R=>R[0]&&/parameter/i.test(R[0][0]||"")&&R[0].some(B=>/response/i.test(B)));if(n.length!==18||i!==4)throw new Error("not the form");*/
+/*async function vc(e){let t,r;try{t=await ls.default.loadAsync(e)*/</script></body></html>`;
 
 async function withApp(fn) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lims-studio-'));
@@ -39,7 +45,7 @@ test('Report Centre is installed, renamed and linked to the LIMS', async () => {
   await withApp(async ({ d, store, base }) => {
     const admin = d.get("SELECT * FROM users WHERE email = 'admin@mydnapedia.example'");
     assert.throws(() => studio.install(d, store, admin, { data: Buffer.from('<html>hello</html>') }), /not the Report Studio/);
-    assert.deepStrictEqual(studio.install(d, store, admin, { data: Buffer.from(FAKE) }), { linked: true });
+    assert.deepStrictEqual(studio.install(d, store, admin, { data: Buffer.from(FAKE) }), { linked: true, tool: 'Report Studio' });
     assert.ok(!store.get('studio/report-studio.html').toString().includes('Zeta'), 'built-in partner names are removed when stored');
 
     const cookie = await signIn(base, 'lab@demo.example');
@@ -47,7 +53,7 @@ test('Report Centre is installed, renamed and linked to the LIMS', async () => {
     assert.match(page, /<title>Report Centre<\/title>/);
     assert.match(page, /partnerTerms:\["Acme Genomics","AcmeGx"\]/, 'the admin\'s names are used');
     assert.match(page, /window\.__LIMS=\{"url":"\/studio\/api","key":"[0-9a-f]{64}","sample":"MDP00020260008","step":"convert"/);
-    for (const [, to] of studio.LINK_PATCHES) assert.ok(page.includes(to));
+    for (const to of ['$o=e=>!!(window.__LIMS||', 'let r=window.__LIMS?"":o2(e.lims.url)', 'fetch((window.__LIMS?window.__LIMS.url:e.lims.url).trim(),', 'key:(window.__LIMS?window.__LIMS.key:e.lims.key).trim()']) assert.ok(page.includes(to), to);
     assert.ok(page.includes('function mdpFormTables(r)'), 'counselling forms with a changed layout can be read');
     const partner = await signIn(base, 'sunrise@demo.example');
     assert.notStrictEqual((await fetch(`${base}/studio`, { headers: { cookie: partner }, redirect: 'manual' })).status, 200);
@@ -123,4 +129,32 @@ test('the action plan reopens with the saved results and the counsellor\'s lates
     assert.strictEqual(back.form.life.diet, 'Vegetarian');
     assert.strictEqual(back.form.priorities, 'Walk daily');
   });
+});
+
+test('a skin sample opens the Skin Health copy for converting', async () => {
+  await withApp(async ({ d, store, base }) => {
+    const admin = d.get("SELECT * FROM users WHERE email = 'admin@mydnapedia.example'");
+    studio.install(d, store, admin, { data: Buffer.from(FAKE) });
+    const SKIN = FAKE.replace('<title>Report Studio</title>', '<title>Skin Health Studio</title>').replace('</script>', 't.partnerTerms=[...t.partnerTerms,"Zeta Skin","ZetaDerm"];</script>');
+    assert.deepStrictEqual(studio.install(d, store, admin, { data: Buffer.from(SKIN) }), { linked: true, tool: 'Skin Health Studio' });
+    assert.ok(!store.get('studio/skin-health-studio.html').toString().includes('Zeta'), 'its extra partner names are removed too');
+    const st = studio.status(store);
+    assert.ok(st.main.installed && st.skin.installed);
+    const cookie = await signIn(base, 'admin@mydnapedia.example');
+    const skinSample = d.get("SELECT s.sample_id FROM samples s JOIN tests t ON t.id = s.test_id WHERE t.code = 'MDPSKIN' LIMIT 1").sample_id;
+    const other = d.get("SELECT s.sample_id FROM samples s JOIN tests t ON t.id = s.test_id WHERE t.code != 'MDPSKIN' LIMIT 1").sample_id;
+    const open = async (q) => (await fetch(`${base}/studio?${q}`, { headers: { cookie } })).text();
+    assert.match(await open(`sample=${skinSample}&step=convert`), /<title>Report Centre · Skin Health<\/title>/);
+    assert.match(await open(`sample=${other}&step=convert`), /<title>Report Centre<\/title>/);
+    assert.match(await open(`sample=${skinSample}&step=plan`), /<title>Report Centre<\/title>/, 'the action plan stays in the main copy');
+    assert.match(await open('tool=skin'), /Skin Health/);
+  });
+});
+
+test('the main copy refuses a skin report instead of labelling it 360 Premium', () => {
+  const code = studio.guardSkin('function qa(r){let d={},c=!1;return{pages:r,fields:d,converted:c}}');
+  const qa = new Function(`${code};return qa`)();
+  const page = (...lines) => ({ body: lines.map((text) => ({ text })) });
+  assert.throws(() => qa([page('Skin Damage', 'x'), page(' Hair Care ')]), /Skin Health report/);
+  assert.deepStrictEqual(qa([page('Nutrition'), page('Hair Care')]).converted, false, 'one skin-like heading is not enough');
 });

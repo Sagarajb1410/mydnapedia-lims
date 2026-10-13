@@ -1,6 +1,10 @@
-# Report Centre tool
+# Report Centre tools
 
-Put the Report Studio HTML file here as `report-studio.html`, or install it from
-the LIMS under Admin, Report Centre. It is not kept in the code repository.
-The LIMS removes its built-in partner names before serving it and uses the
+Put the Report Studio HTML file here as `report-studio.html` and the Skin
+Health Studio file as `skin-health-studio.html`, or install either from the
+LIMS under Admin, Report Centre. They are not kept in the code repository.
+A Skin Health sample opens Skin Health Studio for converting; everything else,
+and every counselling form and action plan, uses Report Studio. Report Studio
+refuses a skin report so it is never labelled 360 Premium.
+The LIMS removes their built-in partner names before serving them and uses the
 names under Admin, Settings instead.

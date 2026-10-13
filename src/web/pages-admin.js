@@ -47,11 +47,10 @@ ${tile('/admin/users', 'register', 'People', 'Sign-ins and roles')}
 ${tile('/audit', 'reports', 'Audit trail', 'Every change, who and when')}</div>
 <h2 id="report-centre">Report Centre</h2><div class="card">${(() => {
   const st = studio.status(storage);
-  return html`<p style="margin-top:0">${st.installed
-    ? html`<span class="pill ${st.linked ? 'good' : 'warn'}">${st.linked ? 'Installed and linked' : 'Installed, not linked'}</span> ${st.from === 'bundled' ? 'Using the copy that came with the LIMS.' : 'Using the copy you installed.'}`
-    : html`<span class="pill warn">Not installed</span> Staff cannot open Report Centre until it is installed.`}</p>
-<p class="muted">Report Centre converts the partner's report, holds the counselling form and drafts the action plan. It runs in the browser, so client data stays inside our system. Install a new version by choosing the Report Studio HTML file; its built-in partner names are removed and the names under Settings are used instead.</p>
-<form method="post" action="/admin/studio" enctype="multipart/form-data"><label for="studio-file">Report Studio HTML file</label><input id="studio-file" type="file" name="file" accept=".html,text/html" required>
+  const row = (t) => html`<li><b>${t.label}</b> <span class="pill ${t.installed ? (t.linked ? 'good' : 'warn') : 'warn'}">${t.installed ? (t.linked ? 'Installed and linked' : 'Installed, not linked') : 'Not installed'}</span> <span class="muted">${t.installed ? (t.from === 'bundled' ? 'The copy that came with the LIMS.' : 'The copy you installed.') : ''}</span></li>`;
+  return html`<ul style="margin-top:0;padding-left:18px;display:grid;gap:6px">${row(st.main)}${row(st.skin)}</ul>
+<p class="muted">Report Centre converts the partner's report, holds the counselling form and drafts the action plan. It runs in the browser, so client data stays inside our system. <b>Report Studio</b> handles 360 Premium and Fitness. <b>Skin Health Studio</b> handles Skin Health: a skin sample opens it automatically for converting. Without it, skin reports are converted as 360 Premium. Install either by choosing its HTML file; the LIMS tells them apart. Their built-in partner names are removed and the names under Settings are used instead.</p>
+<form method="post" action="/admin/studio" enctype="multipart/form-data"><label for="studio-file">Report Studio or Skin Health Studio HTML file</label><input id="studio-file" type="file" name="file" accept=".html,text/html" required>
 <div class="actions"><button class="light">Install</button></div></form>`;
 })()}</div>
 <h2>Settings</h2><form method="post" action="/admin/settings" class="card"><div class="grid">

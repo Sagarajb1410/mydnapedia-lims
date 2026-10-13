@@ -16,7 +16,7 @@ module.exports = function (router, { db, storage }, h) {
     const sample = /^[A-Za-z0-9-]{4,30}$/.test(ctx.query.sample || '') ? ctx.query.sample.toUpperCase() : '';
     if (sample) samples.load(db, ctx.user, sample);
     const step = STEPS.includes(ctx.query.step) ? ctx.query.step : (ctx.user.role === 'counsellor' ? 'form' : 'convert');
-    const page = studio.page(db, storage, ctx.user, { sample, step });
+    const page = studio.page(db, storage, ctx.user, { sample, step, tool: ctx.query.tool === 'skin' ? 'skin' : '' });
     if (!page) {
       return h.send(ctx, studio.NAME, html`<h1>${studio.NAME} is not installed yet</h1>
 <p class="sub">${ctx.user.role === 'admin' ? html`Install it once under <a href="/admin#report-centre">Admin, Report Centre</a>.` : 'Ask the admin to install it under Admin.'}</p>`);
@@ -55,8 +55,8 @@ module.exports = function (router, { db, storage }, h) {
   router.post('/admin/studio', (ctx) => {
     const r = studio.install(db, storage, ctx.user, ctx.files.file);
     h.redirect(ctx, '/admin#report-centre', r.linked
-      ? { type: 'ok', text: `${studio.NAME} is installed and linked to the LIMS.` }
-      : { type: 'warn', text: `${studio.NAME} is installed, but this version could not be linked to the LIMS. Staff can still use it and upload files by hand.` });
+      ? { type: 'ok', text: `${r.tool} is installed and linked to the LIMS.` }
+      : { type: 'warn', text: `${r.tool} is installed, but this version could not be linked to the LIMS. Staff can still use it and upload files by hand.` });
   });
 
   // Button used on the sample page and the Report Centre pages.
@@ -68,6 +68,6 @@ module.exports.head = function head(user, active, sub) {
   const tabs = [['/reports', 'Reports', ['admin', 'lab']], ['/counselling', 'Counselling', ['admin', 'counsellor']], ['/counselling/availability', 'Availability', ['admin', 'counsellor']], ['/plans', 'Action plans', ['admin', 'counsellor']]]
     .filter(([, , roles]) => roles.includes(user.role));
   return html`<div class="head"><div><h1>${studio.NAME}</h1><p class="sub">${sub}</p></div>
-<div class="actions" style="margin:0"><a class="btn" href="/studio" target="_blank" rel="noopener">${icon('reports')}Open ${studio.NAME}</a></div></div>
+<div class="actions" style="margin:0">${['admin', 'lab'].includes(user.role) ? html`<a class="btn light" href="/studio?tool=skin" target="_blank" rel="noopener">${icon('reports')}Skin Health</a>` : ''}<a class="btn" href="/studio" target="_blank" rel="noopener">${icon('reports')}Open ${studio.NAME}</a></div></div>
 ${tabs.length > 1 ? html`<nav class="seg">${tabs.map(([href, label]) => html`<a href="${href}" class="${href === active ? 'on' : ''}">${label}</a>`)}</nav>` : ''}`;
 };
