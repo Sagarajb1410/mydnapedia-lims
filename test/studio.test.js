@@ -158,3 +158,27 @@ test('the main copy refuses a skin report instead of labelling it 360 Premium', 
   assert.throws(() => qa([page('Skin Damage', 'x'), page(' Hair Care ')]), /Skin Health report/);
   assert.deepStrictEqual(qa([page('Nutrition'), page('Hair Care')]).converted, false, 'one skin-like heading is not enough');
 });
+
+test('Fitness and Cardiac reports carry their own name, from the sample\'s test', async () => {
+  // The conversion as the tool writes it, cut down to what the LIMS changes.
+  const src = 'function Qa(e,t,r,n,i=()=>{}){let a=[],s=[],o=Zn(e),{pages:l,fields:h,converted:u}=qa(o);if(u)throw new Error("This file has already been converted. Use the original PDF.");return t}';
+  const run = (product) => new Function('window', `const Zn=(e)=>e,qa=()=>({pages:[],fields:{},converted:!1});${studio.useProduct(src)};return Qa`)({ __LIMS: { product } });
+  const cfg = () => ({ brand: { product: 'MDP 360 PREMIUM' }, foreword: { text: 'your {company} 360 premium report' }, plan: { tier: '360 Premium' } });
+  const out = run({ brand: 'MDP CARDIAC HEALTH', short: 'Cardiac Health' })(null, cfg());
+  assert.deepStrictEqual(out, { brand: { product: 'MDP CARDIAC HEALTH' }, foreword: { text: 'your {company} Cardiac Health report' }, plan: { tier: 'Cardiac Health' } });
+  assert.deepStrictEqual(run(null)(null, cfg()), cfg(), 'a 360 sample keeps the defaults');
+
+  await withApp(async ({ d, store, base }) => {
+    const admin = d.get("SELECT * FROM users WHERE email = 'admin@mydnapedia.example'");
+    studio.install(d, store, admin, { data: Buffer.from(FAKE) });
+    const cookie = await signIn(base, 'admin@mydnapedia.example');
+    const product = async (code) => {
+      const id = d.get('SELECT s.sample_id FROM samples s JOIN tests t ON t.id = s.test_id WHERE t.code = ? LIMIT 1', code).sample_id;
+      const page = await (await fetch(`${base}/studio?sample=${id}&step=convert`, { headers: { cookie } })).text();
+      return JSON.parse(/window\.__LIMS=(\{.*?\});<\/script>/.exec(page)[1]).product;
+    };
+    assert.deepStrictEqual(await product('MDPFIT'), { brand: 'MDP FITNESS', short: 'Fitness' });
+    assert.deepStrictEqual(await product('MDPCARD'), { brand: 'MDP CARDIAC HEALTH', short: 'Cardiac Health' });
+    assert.strictEqual(await product('MDP360P'), null);
+  });
+});

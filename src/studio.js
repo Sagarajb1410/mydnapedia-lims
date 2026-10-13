@@ -54,6 +54,26 @@ function guardSkin(text) {
   return text.replace(ANALYSE_RE, (m, pages) => `if(new Set(${pages}.flatMap(x=>(x.body||[]).map(g=>String(g.text||"").trim()).filter(g=>${SKIN_HEADINGS}.test(g)))).size>=2)throw new Error(${JSON.stringify(SKIN_REFUSAL)});${m}`);
 }
 
+// The main copy brands every report "MDP 360 PREMIUM" unless it recognises the
+// layout (only Fitness, by its picture pages). Opened on a sample, the LIMS tells
+// it the sample's test, so Fitness and Cardiac reports carry their own name in
+// the header and foreword. Inserted at the start of the conversion, after the
+// layout check, so the sample's test has the last word.
+const CONVERT_RE = /(function [\w$]+\(e,t,r,n,i=\(\)=>\{\}\)\{let a=\[\],s=\[\],o=[\w$]+\(e\),\{pages:([\w$]+),fields:[\w$]+,converted:([\w$]+)\}=[\w$]+\(o\);(?:t=[\w$]+\(\2,t\);)?)(?=if\(\3\)throw new Error\("This file has already been converted)/;
+const USE_PRODUCT = 'if(window.__LIMS&&window.__LIMS.product){let P=window.__LIMS.product;t=JSON.parse(JSON.stringify(t));t.brand.product=P.brand;t.foreword.text=String(t.foreword.text||"").replace(/360 premium/gi,P.short);if(t.plan)t.plan.tier=P.short}';
+function useProduct(text) {
+  return text.replace(CONVERT_RE, (m) => m + USE_PRODUCT);
+}
+
+// What the main copy should call a sample's report, or null for 360 Premium
+// (its own default) and tests that are not converted from a partner report.
+function productFor(db, sampleId) {
+  if (!sampleId) return null;
+  const t = db.get('SELECT t.code, t.name, t.route FROM samples s JOIN tests t ON t.id = s.test_id WHERE s.sample_id = ?', sampleId);
+  if (!t || t.route !== 'partner_lab' || /360/.test(t.name)) return null;
+  return { brand: t.name.toUpperCase(), short: t.name.replace(/^MDP\s+/i, '') };
+}
+
 const linkable = (text) => LINK_PATCHES.every(([re]) => re.test(text));
 
 function looksLikeStudio(text) {
@@ -115,7 +135,7 @@ function base(db, storage, tool = 'main') {
   if (linked) for (const [re, to] of LINK_PATCHES) text = text.replace(re, to);
   // Reads counselling forms whose layout was changed in Word (see studio-form.js).
   text = patchForm(text);
-  if (tool === 'main') text = guardSkin(text);
+  if (tool === 'main') text = useProduct(guardSkin(text));
   text = text.replace(/Report Studio/g, NAME).replace(/<title>Skin Health Studio<\/title>/, `<title>${NAME} · Skin Health</title>`);
   const out = { raw: s.text, terms: terms.join('|'), text, linked };
   cache.set(tool, out);
@@ -154,7 +174,7 @@ function page(db, storage, user, { sample, step, tool } = {}) {
   const b = base(db, storage, toolFor(db, storage, user, sample, step, tool));
   if (!b) return null;
   const head = b.linked
-    ? `<script>window.__LIMS=${js({ url: '/studio/api', key: keyFor(db, user), sample: sample || '', step: step || '', role: user.role, results: hasResults(db, storage, user, sample) })};</script>`
+    ? `<script>window.__LIMS=${js({ url: '/studio/api', key: keyFor(db, user), sample: sample || '', step: step || '', role: user.role, results: hasResults(db, storage, user, sample), product: productFor(db, sample) })};</script>`
     : '';
   const tail = b.linked && sample ? `<script>${OPENER}</script>` : '';
   return b.text.replace('<head>', () => `<head>${head}`).replace('</body>', () => `${tail}</body>`);
@@ -318,4 +338,4 @@ function api(db, storage, req) {
   throw new UserError('Unknown request.');
 }
 
-module.exports = { install, status, page, api, docs, scrub, looksLikeStudio, toolOf, guardSkin, NAME, LINK_PATCHES, TOOLS };
+module.exports = { install, status, page, api, docs, scrub, looksLikeStudio, toolOf, guardSkin, useProduct, NAME, LINK_PATCHES, TOOLS };
