@@ -96,12 +96,22 @@ function keyFor(db, user) {
   return token;
 }
 
+// Whether the case saved for a sample already holds the converted results.
+function hasResults(db, storage, user, sampleId) {
+  if (!sampleId) return false;
+  try {
+    const s = samples.load(db, user, sampleId);
+    const saved = db.get("SELECT file_key FROM studio_docs WHERE sample_pk = ? AND kind = 'case' ORDER BY id DESC LIMIT 1", s.id);
+    return Boolean(saved && JSON.parse(storage.get(saved.file_key).toString('utf8')).clinical);
+  } catch { return false; }
+}
+
 // The page for one person, optionally opened on one sample.
 function page(db, storage, user, { sample, step } = {}) {
   const b = base(db, storage);
   if (!b) return null;
   const head = b.linked
-    ? `<script>window.__LIMS=${js({ url: '/studio/api', key: keyFor(db, user), sample: sample || '', step: step || '', role: user.role })};</script>`
+    ? `<script>window.__LIMS=${js({ url: '/studio/api', key: keyFor(db, user), sample: sample || '', step: step || '', role: user.role, results: hasResults(db, storage, user, sample) })};</script>`
     : '';
   const tail = b.linked && sample ? `<script>${OPENER}</script>` : '';
   return b.text.replace('<head>', () => `<head>${head}`).replace('</body>', () => `${tail}</body>`);
@@ -130,7 +140,8 @@ async function run(){
   if(L.step==='convert'){$('#l-use').click();tab('convert');return;}
   var c=$('#l-case');if(c&&!c.hidden){c.click();await pause(300);if(c.dataset.armed)c.click();await pause(1500);}
   else $('#l-use').click();
-  if(await loadPdf()&&/No client open/.test(($('#caseName')||{}).textContent||'')&&c&&!c.hidden){
+  // The saved case already has the results: no need to read the partner's PDF again.
+  if(!L.results&&await loadPdf()&&/No client open/.test(($('#caseName')||{}).textContent||'')&&c&&!c.hidden){
     tab('lims');c.click();await pause(300);if(c.dataset.armed)c.click();await pause(1500);
   }
   tab(L.step==='plan'?'plan':'form');
@@ -153,12 +164,30 @@ function docs(db, samplePk) {
   return db.all('SELECT * FROM studio_docs WHERE sample_pk = ? ORDER BY id DESC', samplePk);
 }
 
-// The latest case saved from the tool, else one built from the LIMS form.
+// The latest case saved from the tool (results and answers), else one built
+// from the LIMS form. When the counsellor filled in or changed the LIMS form
+// after the case was saved, their answers replace the saved ones, so the action
+// plan can be made without converting the report again.
 function caseFor(db, storage, user, s) {
   const saved = db.get("SELECT * FROM studio_docs WHERE sample_pk = ? AND kind = 'case' ORDER BY id DESC LIMIT 1", s.id);
-  if (saved) return storage.get(saved.file_key).toString('utf8');
-  if (['admin', 'counsellor'].includes(user.role) && counselling.STAGES.includes(s.status)) return JSON.stringify(counselling.caseFile(db, user, s.sample_id));
-  return null;
+  const counsellingRole = ['admin', 'counsellor'].includes(user.role);
+  if (!saved) return counsellingRole && counselling.STAGES.includes(s.status) ? JSON.stringify(counselling.caseFile(db, user, s.sample_id)) : null;
+  const json = storage.get(saved.file_key).toString('utf8');
+  const lims = counsellingRole ? counselling.loadForm(db, s.id) : null;
+  if (!lims || lims.updated_at <= saved.uploaded_at || !counselling.STAGES.includes(s.status)) return json;
+  let c;
+  try { c = JSON.parse(json); } catch { return json; }
+  const fresh = counselling.caseFile(db, user, s.sample_id);
+  const merged = { ...(c.form || {}), life: { ...((c.form || {}).life || {}) } };
+  for (const f of form.FIELDS) {
+    const v = form.get(fresh.form, f.key);
+    if (v == null || v === '' || (Array.isArray(v) && !v.length)) continue;
+    const [a, b] = f.key.split('.');
+    if (b) merged[a] = { ...(merged[a] || {}), [b]: v }; else merged[a] = v;
+  }
+  if (fresh.form.counsellor) merged.counsellor = fresh.form.counsellor;
+  if (fresh.form.sessionDate) merged.sessionDate = fresh.form.sessionDate;
+  return JSON.stringify({ ...c, form: merged, mail: { ...(c.mail || {}), ...Object.fromEntries(Object.entries(fresh.mail).filter(([, v]) => v)) } });
 }
 
 function saveDoc(db, storage, user, s, kind, name, mime, data) {

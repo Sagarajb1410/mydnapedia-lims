@@ -9,6 +9,7 @@ const storage = require('../src/storage');
 const seed = require('../src/seed');
 const pdfwrite = require('../src/pdfwrite');
 const studio = require('../src/studio');
+const counselling = require('../src/counselling');
 const { FORM_PATCHES } = require('../src/studio-form');
 const { createApp } = require('../src/web/app');
 
@@ -95,5 +96,31 @@ test('a case sent from Report Centre is stored and fills in the counselling form
     assert.strictEqual(String(JSON.parse(f.data_json).heightCm), '170');
     const after = await call({ action: 'loadCase', sampleId: 'MDP00020260014' });
     assert.strictEqual(JSON.parse(after.data.json).form.heightCm, '170', 'the saved case comes back');
+  });
+});
+
+test('the action plan reopens with the saved results and the counsellor\'s latest answers', async () => {
+  await withApp(async ({ d, store, base }) => {
+    const admin = d.get("SELECT * FROM users WHERE email = 'admin@mydnapedia.example'");
+    const counsellor = d.get("SELECT u.*, NULL AS account_type FROM users u WHERE email = 'counsellor@demo.example'");
+    studio.install(d, store, admin, { data: Buffer.from(FAKE) });
+    const cookie = await signIn(base, 'admin@mydnapedia.example');
+    const open = async () => (await fetch(`${base}/studio?sample=MDP00020260014&step=plan`, { headers: { cookie } })).text();
+    const key = /"key":"([0-9a-f]{64})"/.exec(await open())[1];
+    const call = async (body) => (await fetch(`${base}/studio/api`, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify({ ...body, key }) })).json();
+    // The report is converted once; its case (results, empty form) is sent to the LIMS.
+    const c = JSON.parse((await call({ action: 'loadCase', sampleId: 'MDP00020260014' })).data.json);
+    c.clinical = { rows: [{ name: 'Trait A', level: 2 }] };
+    c.form = { ...c.form, priorities: 'From the tool', life: {} };
+    assert.ok((await call({ action: 'push', sampleId: 'MDP00020260014', kind: 'case', name: 'case.json', mime: 'application/json', b64: Buffer.from(JSON.stringify(c)).toString('base64') })).ok);
+    assert.match(await open(), /"results":true/, 'the saved case has the results, so the partner PDF is not read again');
+    // Later the counsellor fills in the form in the LIMS.
+    await new Promise((r) => setTimeout(r, 20));
+    counselling.saveForm(d, counsellor, 'MDP00020260014', { heightCm: '168', weightKg: '64', bp: '118/76', 'life.diet': 'Vegetarian', 'life.actType': 'Walking', 'life.sleepHours': '7-8', 'life.tobacco': 'Never', 'life.alcohol': 'Never', priorities: 'Walk daily' }, { complete: true });
+    const back = JSON.parse((await call({ action: 'loadCase', sampleId: 'MDP00020260014' })).data.json);
+    assert.deepStrictEqual(back.clinical, c.clinical, 'the results are kept');
+    assert.strictEqual(String(back.form.heightCm), '168');
+    assert.strictEqual(back.form.life.diet, 'Vegetarian');
+    assert.strictEqual(back.form.priorities, 'Walk daily');
   });
 });
