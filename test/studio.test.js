@@ -202,10 +202,12 @@ test('each action plan fits its own test', () => {
 let v=[{t:"title",text:y+" Post-Test Plan",sub:"all"},{t:"p",text:"It turns your report into day-to-day steps for nutrition, fitness and more."},
 ${sec('Section A', 'Nutrition Action Plan')},${sec('Section B', 'Fitness & Physical Activity Plan')},${sec('Section C', 'Mental Wellbeing Plan')},${sec('Section D', 'Prevention of Risks')}];
 $&&v.push({t:"section",kicker:"Section E",title:"Skin Health"});v.push({t:"section",kicker:"For your doctor",title:"Note for Your Physician \\u2014 Medicines"},{t:"section",kicker:"What to do now",title:"Next Steps"},{t:"closing",text:"Bye"});
-return{blocks:v,includeSkin:$}}t.generate=d,t.fileName=0})(G)`;
+return{blocks:v,includeSkin:$}}t.generate=d,t.fileName=0})(G);
+let St=(g,r)=>{let i=g.findIndex(b=>b.t==="section"&&r.test(b.title));return i<0?null:[i,i+2]};
+G.finish=function(e,t={}){let p=G.AP.generate(e),g=p.blocks;for(let r of[/Fitness & Physical Activity/,/Mental Wellbeing/]){let z=St(g,r);g.splice(z[1],0,{t:"bullets",items:["from the report"]})}return{plan:p,input:e,notes:0}}`;
   const G = {};
   new Function('G', scopePlan(tool))(G);
-  const plan = (tier) => G.AP.generate({ client: { tier } }).blocks;
+  const plan = (tier) => G.finish({ client: { tier } }).plan.blocks;
   const sections = (tier) => plan(tier).filter((b) => b.t === 'section').map((b) => `${b.kicker}: ${b.title.split(' —')[0]}`);
   assert.deepStrictEqual(sections('Cardiac Health'), ['Section A: Nutrition Action Plan', 'Section B: Fitness & Physical Activity Plan', 'Section C: Mental Wellbeing Plan', 'Section D: Prevention of Risks', 'For your doctor: Note for Your Physician', 'What to do now: Next Steps']);
   assert.ok(!sections('Fitness').some((s) => s.includes('Physician')), 'fitness reports have no medicines section');
