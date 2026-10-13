@@ -135,7 +135,7 @@ test('a skin sample opens the Skin Health copy for converting', async () => {
   await withApp(async ({ d, store, base }) => {
     const admin = d.get("SELECT * FROM users WHERE email = 'admin@mydnapedia.example'");
     studio.install(d, store, admin, { data: Buffer.from(FAKE) });
-    const SKIN = FAKE.replace('<title>Report Studio</title>', '<title>Skin Health Studio</title>').replace('</script>', 't.partnerTerms=[...t.partnerTerms,"Zeta Skin","ZetaDerm"];</script>');
+    const SKIN = FAKE.replace('<title>Report Studio</title>', '<title>Skin Health Studio</title>').replace('</script>', 't.partnerTerms=[...t.partnerTerms,"Zeta Skin","ZetaDerm"];var Nr={skin:{id:"skin",label:"MDP Skin Health",care:!1}};</script>');
     assert.deepStrictEqual(studio.install(d, store, admin, { data: Buffer.from(SKIN) }), { linked: true, tool: 'Skin Health Studio' });
     assert.ok(!store.get('studio/skin-health-studio.html').toString().includes('Zeta'), 'its extra partner names are removed too');
     const st = studio.status(store);
@@ -146,8 +146,16 @@ test('a skin sample opens the Skin Health copy for converting', async () => {
     const open = async (q) => (await fetch(`${base}/studio?${q}`, { headers: { cookie } })).text();
     assert.match(await open(`sample=${skinSample}&step=convert`), /<title>Report Centre · Skin Health<\/title>/);
     assert.match(await open(`sample=${other}&step=convert`), /<title>Report Centre<\/title>/);
-    assert.match(await open(`sample=${skinSample}&step=plan`), /<title>Report Centre<\/title>/, 'the action plan stays in the main copy');
+    assert.match(await open(`sample=${skinSample}&step=plan`), /<title>Report Centre · Skin Health<\/title>/, 'the action plan opens in the Skin Health copy too');
     assert.match(await open('tool=skin'), /Skin Health/);
+    const plan = await open(`sample=${skinSample}&step=plan`);
+    assert.ok(plan.includes('skin:{id:"skin",label:"MDP Skin Health",care:!0}'), 'the counselling form and action plan tabs are switched on');
+    const key = /"key":"([0-9a-f]{64})"/.exec(plan)[1];
+    const call = async (body) => (await fetch(`${base}/studio/api`, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify({ ...body, key }) })).json();
+    const released = d.get("SELECT s.sample_id FROM samples s JOIN tests t ON t.id = s.test_id WHERE t.code = 'MDPSKIN' AND s.status = 'REPORT_RELEASED' LIMIT 1").sample_id;
+    const c = await call({ action: 'loadCase', sampleId: released });
+    assert.ok(c.ok && c.data.found, c.error);
+    assert.strictEqual(JSON.parse(c.data.json).product, 'skin', 'skin cases open in the Skin Health copy');
   });
 });
 

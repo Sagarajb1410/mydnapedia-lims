@@ -77,6 +77,8 @@ function productFor(db, sampleId) {
   return { brand: t.name.toUpperCase(), short: t.name.replace(/^MDP\s+/i, '') };
 }
 
+const SKIN_CARE_RE = /(skin:\{id:"skin",[^}]*?)care:!1\}/;
+
 const linkable = (text) => LINK_PATCHES.every(([re]) => re.test(text));
 
 function looksLikeStudio(text) {
@@ -141,19 +143,27 @@ function base(db, storage, tool = 'main') {
   // Each action plan fits its own test (see studio-plan.js).
   text = scopePlan(text);
   if (tool === 'main') text = useProduct(guardSkin(text));
+  // The Skin Health copy was made without the counselling form and action plan
+  // tabs. Every test gets an action plan, so they are switched on.
+  if (tool === 'skin') text = text.replace(SKIN_CARE_RE, '$1care:!0}');
   text = text.replace(/Report Studio/g, NAME).replace(/<title>Skin Health Studio<\/title>/, `<title>${NAME} · Skin Health</title>`);
   const out = { raw: s.text, terms: terms.join('|'), text, linked };
   cache.set(tool, out);
   return out;
 }
 
-// The copy to open: the Skin Health one for converting a skin test's report,
-// when it is installed; the main one otherwise.
+// The copy to open: the Skin Health one for a skin test's sample (converting,
+// counselling form and action plan alike), when it is installed; the main one
+// otherwise.
+const isSkinTest = (db, sampleId) => {
+  const t = db.get('SELECT t.code, t.name FROM samples s JOIN tests t ON t.id = s.test_id WHERE s.sample_id = ?', sampleId);
+  return Boolean(t && /skin/i.test(`${t.code} ${t.name}`));
+};
+
 function toolFor(db, storage, user, sampleId, step, asked) {
   if (asked === 'skin' && source(storage, 'skin')) return 'skin';
-  if (!sampleId || step === 'form' || step === 'plan') return 'main';
-  const t = db.get('SELECT t.code, t.name FROM samples s JOIN tests t ON t.id = s.test_id WHERE s.sample_id = ?', sampleId);
-  return t && /skin/i.test(`${t.code} ${t.name}`) && source(storage, 'skin') ? 'skin' : 'main';
+  if (!sampleId) return 'main';
+  return isSkinTest(db, sampleId) && source(storage, 'skin') ? 'skin' : 'main';
 }
 
 // A sign-in key for the tool, valid as long as a normal sign-in.
@@ -306,7 +316,11 @@ function api(db, storage, req) {
     };
   }
   if (req.action === 'loadCase') {
-    const json = caseFor(db, storage, user, s);
+    let json = caseFor(db, storage, user, s);
+    // The Skin Health copy only opens cases marked as skin.
+    if (json && isSkinTest(db, s.sample_id)) {
+      try { json = JSON.stringify({ ...JSON.parse(json), product: 'skin' }); } catch { /* leave it as stored */ }
+    }
     return json ? { found: true, json } : { found: false };
   }
   if (req.action === 'push') {
