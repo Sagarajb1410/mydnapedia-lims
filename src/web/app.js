@@ -64,11 +64,25 @@ function createApp({ db, storage }) {
     }
   });
 
+  // Test version only (the LIMS listens on this computer alone): say which data
+  // is open and, on an empty LIMS, show the first admin sign-in until it is used.
+  function testHelp() {
+    if (config.live) return '';
+    if (db.get("SELECT id FROM users WHERE email = 'sunrise@demo.example'")) {
+      return html`<div class="flash warn" style="margin-bottom:14px"><div><b>Demo data is open.</b> Sign in as admin@mydnapedia.example (or any demo account) with the password <b>test1234</b>.</div></div>`;
+    }
+    const first = db.get("SELECT email FROM users WHERE role = 'admin' AND must_change_password = 1 ORDER BY id LIMIT 1");
+    const note = path.join(config.dataDir, 'FIRST-SIGN-IN.txt');
+    const pw = first && fs.existsSync(note) ? (fs.readFileSync(note, 'utf8').match(/One-time password: (\S+)/) || [])[1] : null;
+    return html`<div class="flash ok" style="margin-bottom:14px"><div><b>Your own data is open</b> (folder ${path.basename(config.dataDir)}).${pw ? html` First sign-in: <b>${first.email}</b> with the one-time password <b>${pw}</b>. You will then choose your own password.` : ''}</div></div>`;
+  }
+
   function loginPage(ctx, email = '') {
     const flash = ctx.flash;
     helpers.send(ctx, 'Sign in', html`<div class="auth"><div class="art"><div class="q"><i></i><b>Every sample, from collection to counselling, in one place.</b><span>Know your DNA · Make better choices</span></div></div>
 <div class="pane"><form method="post" action="/login"><img src="/static/logo-sm.png" alt="MyDNAPedia">
 <h1>Welcome back</h1><p class="sub">Sign in to the MyDNAPedia laboratory system.</p>
+${testHelp()}
 ${flash ? html`<div class="flash ${flash.type}">${icon('alert')}<div>${flash.text}</div></div>` : ''}
 <div class="grid">
 ${field('Email', 'email', email, { type: 'email', required: true, attrs: 'autocomplete="username" autofocus' })}
@@ -99,6 +113,7 @@ ${field('New password again', 'confirm', '', { type: 'password', required: true 
 </div><div class="actions"><button>Save</button></div></form>`);
   }
 
+  require('./pages-bulk')(router, ctxBase, helpers);
   require('./pages-samples')(router, ctxBase, helpers);
   require('./pages-tracking')(router, ctxBase, helpers);
   require('./pages-reports')(router, ctxBase, helpers);
@@ -107,8 +122,9 @@ ${field('New password again', 'confirm', '', { type: 'password', required: true 
   require('./pages-admin')(router, ctxBase, helpers);
   require('./pages-monthly')(router, ctxBase, helpers);
   require('./pages-studio')(router, ctxBase, helpers);
+  require('./pages-track')(router, ctxBase, helpers);
 
-  const PUBLIC = new Set(['/login', '/studio/api']);
+  const PUBLIC = new Set(['/login', '/studio/api', '/track', '/track/book']);
   const isPublic = (p) => PUBLIC.has(p) || p.startsWith('/static/');
 
   async function handle(req, res) {

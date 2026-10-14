@@ -13,10 +13,10 @@ const STEPS = ['convert', 'form', 'plan'];
 module.exports = function (router, { db, storage }, h) {
   router.get('/studio', (ctx) => {
     if (!ROLES.includes(ctx.user.role)) throw new UserError('Report Centre is for MyDNAPedia staff and counsellors.');
-    const sample = /^[A-Za-z]{2,5}\d{2}-\d{6}$/.test(ctx.query.sample || '') ? ctx.query.sample.toUpperCase() : '';
+    const sample = /^[A-Za-z0-9-]{4,30}$/.test(ctx.query.sample || '') ? ctx.query.sample.toUpperCase() : '';
     if (sample) samples.load(db, ctx.user, sample);
     const step = STEPS.includes(ctx.query.step) ? ctx.query.step : (ctx.user.role === 'counsellor' ? 'form' : 'convert');
-    const page = studio.page(db, storage, ctx.user, { sample, step });
+    const page = studio.page(db, storage, ctx.user, { sample, step, tool: ctx.query.tool === 'skin' ? 'skin' : '' });
     if (!page) {
       return h.send(ctx, studio.NAME, html`<h1>${studio.NAME} is not installed yet</h1>
 <p class="sub">${ctx.user.role === 'admin' ? html`Install it once under <a href="/admin#report-centre">Admin, Report Centre</a>.` : 'Ask the admin to install it under Admin.'}</p>`);
@@ -31,6 +31,15 @@ module.exports = function (router, { db, storage }, h) {
     const r = reports.forSample(db, s.id).find((x) => x.kind === 'source' && x.status !== 'superseded');
     if (!r || !reports.canOpen(ctx.user, r, s)) { ctx.res.writeHead(404); ctx.res.end(); return; }
     h.raw(ctx, 'application/pdf', storage.get(r.file_key), { 'X-File-Name': encodeURIComponent(r.file_name || 'partner-report.pdf'), 'X-Content-Type-Options': 'nosniff' });
+  });
+
+  // Our white-labelled report, read by the action plan window for the results.
+  router.get('/studio/branded/:id', (ctx) => {
+    if (!ROLES.includes(ctx.user.role)) throw new UserError('Not allowed.');
+    const s = samples.load(db, ctx.user, ctx.params.id);
+    const r = reports.forSample(db, s.id).find((x) => x.kind === 'branded' && !['superseded', 'blocked'].includes(x.status) && reports.canOpen(ctx.user, x, s));
+    if (!r) { ctx.res.writeHead(404); ctx.res.end(); return; }
+    h.raw(ctx, 'application/pdf', storage.get(r.file_key), { 'X-File-Name': encodeURIComponent(r.file_name || `${s.sample_id}.pdf`), 'X-Content-Type-Options': 'nosniff' });
   });
 
   // The tool's own LIMS protocol. It sends a sign-in key instead of the cookie.
@@ -55,8 +64,8 @@ module.exports = function (router, { db, storage }, h) {
   router.post('/admin/studio', (ctx) => {
     const r = studio.install(db, storage, ctx.user, ctx.files.file);
     h.redirect(ctx, '/admin#report-centre', r.linked
-      ? { type: 'ok', text: `${studio.NAME} is installed and linked to the LIMS.` }
-      : { type: 'warn', text: `${studio.NAME} is installed, but this version could not be linked to the LIMS. Staff can still use it and upload files by hand.` });
+      ? { type: 'ok', text: `${r.tool} is installed and linked to the LIMS.` }
+      : { type: 'warn', text: `${r.tool} is installed, but this version could not be linked to the LIMS. Staff can still use it and upload files by hand.` });
   });
 
   // Button used on the sample page and the Report Centre pages.
@@ -65,9 +74,10 @@ module.exports = function (router, { db, storage }, h) {
 
 // The heading shared by the three Report Centre pages.
 module.exports.head = function head(user, active, sub) {
-  const tabs = [['/reports', 'Reports', ['admin', 'lab']], ['/counselling', 'Counselling', ['admin', 'counsellor']], ['/plans', 'Action plans', ['admin', 'counsellor']]]
+  const tabs = [['/reports', 'Reports', ['admin', 'lab']], ['/counselling', 'Counselling', ['admin', 'counsellor']], ['/counselling/availability', 'Availability', ['admin', 'counsellor']], ['/plans', 'Action plans', ['admin', 'counsellor']]]
     .filter(([, , roles]) => roles.includes(user.role));
   return html`<div class="head"><div><h1>${studio.NAME}</h1><p class="sub">${sub}</p></div>
-<div class="actions" style="margin:0"><a class="btn" href="/studio" target="_blank" rel="noopener">${icon('reports')}Open ${studio.NAME}</a></div></div>
+<div class="actions" style="margin:0">${['admin', 'lab'].includes(user.role) ? html`<a class="btn light" href="/studio?tool=skin" target="_blank" rel="noopener">${icon('reports')}Skin Health</a>` : ''}<a class="btn" href="/studio" target="_blank" rel="noopener">${icon('reports')}Open ${studio.NAME}</a></div></div>
+${['admin', 'counsellor'].includes(user.role) ? html`<form method="get" action="/studio" target="_blank" class="actions noprint" style="margin:0 0 14px"><input type="hidden" name="step" value="plan"><input name="sample" placeholder="Sample ID (optional)" pattern="[A-Za-z0-9-]{4,30}" style="max-width:240px"><button>${icon('plan')}Action plan window</button><span class="muted">Add the white-labelled report and the counsellor's filled form there; it creates the plan.</span></form>` : ''}
 ${tabs.length > 1 ? html`<nav class="seg">${tabs.map(([href, label]) => html`<a href="${href}" class="${href === active ? 'on' : ''}">${label}</a>`)}</nav>` : ''}`;
 };

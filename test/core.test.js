@@ -35,7 +35,7 @@ test('Code 128 patterns are all 11 modules wide and distinct', () => {
   // Known checksum: "PJJ123C" in set B has check value 55: (104 + 48 + 42*2 + 42*3 + 17*4 + 18*5 + 19*6 + 35*7) mod 103.
   const v = barcode.encode('PJJ123C');
   assert.equal(v.at(-2), 55);
-  assert.match(barcode.svg('MDP26-000001'), /^<svg/);
+  assert.match(barcode.svg('MDP00020260001'), /^<svg/);
 });
 
 test('partner registration deducts the partner price and is never blocked', () => {
@@ -45,7 +45,7 @@ test('partner registration deducts the partner price and is never blocked', () =
   const before = billing.balance(db, care.account_id);
   assert.ok(before < 0, 'demo leaves CareWell below zero');
   const { sample } = samples.register(db, care, { ...patient(), test_id: String(fit.id) });
-  assert.match(sample.sample_id, /^MDP\d{2}-\d{6}$/);
+  assert.match(sample.sample_id, /^MDP000\d{4}\d{4}$/);
   assert.equal(billing.balance(db, care.account_id), before - 799900);
   const bill = db.get('SELECT * FROM bills WHERE sample_pk = ?', sample.id);
   assert.equal(bill.price_list, 'partner');
@@ -144,4 +144,36 @@ test('the partner lab is never named in stored messages', () => {
   const { db } = fresh();
   const rows = db.all('SELECT body, subject FROM notifications');
   for (const r of rows) assert.doesNotMatch(`${r.subject} ${r.body}`, /MMG/i);
+});
+
+test('a sample registered late keeps its real collection date', () => {
+  const { db, user } = fresh();
+  const sun = user('sunrise@demo.example');
+  const t = String(db.get("SELECT id FROM tests WHERE code = 'MDPSKIN'").id);
+  const local = (days) => new Date(Date.now() - days * 86400000 + 330 * 60000).toISOString().slice(0, 16);
+  const { sample } = samples.register(db, sun, { ...patient({ mobile: '9876500088' }), test_id: t, collected_now: 'yes', collector: 'Raj', collected_at: local(3) });
+  const row = db.get('SELECT status, collected_at, registered_at FROM samples WHERE id = ?', sample.id);
+  assert.equal(row.status, 'COLLECTED');
+  assert.ok(new Date(row.registered_at) - new Date(row.collected_at) > 2.9 * 86400000);
+  const s2 = samples.register(db, sun, { ...patient({ mobile: '9876500089' }), test_id: t }).sample;
+  assert.throws(() => samples.collect(db, sun, s2.sample_id, { collector: 'Raj', collectedAt: local(40) }), /more than 30 days/);
+  assert.throws(() => samples.collect(db, sun, s2.sample_id, { collector: 'Raj', collectedAt: local(-1) }), /later than now.*AM\/PM/);
+});
+
+test('sample IDs follow the admin format and can continue an existing series', () => {
+  const { db, user } = fresh();
+  const sun = user('sunrise@demo.example');
+  const t = String(db.get("SELECT id FROM tests WHERE code = 'MDPSKIN'").id);
+  const year = istDate().slice(0, 4);
+  assert.equal(samples.formatSampleId('{PREFIX}000{YYYY}{N4}', 'MDP', '2026', 7), 'MDP00020260007');
+  assert.equal(samples.formatSampleId('{PREFIX}{YY}-{N6}', 'MDP', '2026', 7), 'MDP26-000007');
+  assert.throws(() => samples.checkFormat('MDP{YYYY}'), /running number/);
+  samples.setNextSampleNumber(db, 345);
+  assert.equal(samples.nextSampleNumber(db), 345);
+  const { sample } = samples.register(db, sun, { ...patient({ mobile: '9876500091' }), test_id: t });
+  assert.equal(sample.sample_id, `MDP000${year}0345`);
+  // Setting the number back skips IDs already used.
+  samples.setNextSampleNumber(db, 345);
+  const again = samples.register(db, sun, { ...patient({ mobile: '9876500092' }), test_id: t }).sample;
+  assert.equal(again.sample_id, `MDP000${year}0346`);
 });

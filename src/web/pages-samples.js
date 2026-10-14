@@ -6,11 +6,14 @@ const billing = require('../billing');
 const barcode = require('../barcode');
 const tracking = require('../tracking');
 const invoice = require('../invoice');
+const track = require('../track');
 const { fmtDateTime, fmtDate, rupees, toPaise, UserError, getSetting, istDate } = require('../util');
 
 const PAY_MODES = ['Cash', 'UPI', 'Card', 'Bank transfer', ['pending', 'Payment pending']];
 const GST_RATES = [['0', '0%'], ['500', '5%'], ['1200', '12%'], ['1800', '18%']];
 const ROUTE_LABEL = { in_house: 'In-house', partner_lab: 'Partner lab' };
+// The end of today in India, so the date picker greys out future days.
+const maxLocal = () => `${istDate()}T23:59`;
 
 function isStaff(user) {
   return user.role === 'admin' || user.role === 'lab';
@@ -117,7 +120,7 @@ ${pendingRecharges ? html`<div class="flash warn" style="margin:12px 0 0">${icon
     };
     const title = u.role === 'partner' ? 'Your samples' : u.role === 'counsellor' ? 'Clients' : 'Samples';
     h.send(ctx, title, html`<div class="head"><div><h1>${title}</h1><p class="sub">${q ? html`Results for “${q}” · ` : ''}${rows.length} shown${rows.length === 200 ? ' (latest 200)' : ''}</p></div>
-${samples.canRegister(u) ? html`<a class="btn" href="/samples/new">${icon('plus')}Register a sample</a>` : ''}</div>
+${samples.canRegister(u) ? html`<div class="actions" style="margin:0"><a class="btn light" href="/samples/bulk">${icon('upload')}Upload from Excel</a><a class="btn" href="/samples/new">${icon('plus')}Register a sample</a></div>` : ''}</div>
 <div class="chips"><a class="chip ${!phase && !status ? 'on' : ''}" href="${link({})}">All<span>${all}</span></a>
 ${journey.PHASES.filter((p) => cnt(p.statuses) || phase === p).map((p) => html`<a class="chip ${phase === p && !status ? 'on' : ''}" href="${link({ phase: p.key })}">${p.label}<span>${cnt(p.statuses)}</span></a>`)}
 ${journey.EXCEPTIONS.filter((k) => byStatus[k] || status === k).map((k) => html`<a class="chip ${status === k ? 'on' : ''}" href="${link({ status: k })}">${samples.STATUSES[k]}<span>${byStatus[k] || 0}</span></a>`)}
@@ -147,7 +150,8 @@ ${rows.length ? '' : html`<tr><td colspan="7"><div class="empty">${icon('search'
     const kind = account.type;
     h.send(ctx, 'Register a sample', html`<h1>Register a sample</h1>
 <p class="sub">Registering for <b>${account.name}</b>. ${kind === 'partner' ? html`Credit balance: <b class="${bal < 0 ? 'neg' : ''}">${rupees(bal)}</b>. The test price is deducted when you save.` : ''}
-${kind === 'supplier' ? 'You bill the patient under your own company name and GST number.' : ''}${kind === 'main' ? 'Direct registration at our standard price.' : ''}</p>
+${kind === 'supplier' ? 'You bill the patient under your own company name and GST number.' : ''}${kind === 'main' ? 'Direct registration at our standard price.' : ''}
+Registering many? <a href="/samples/bulk">Upload an Excel sheet</a>.</p>
 ${duplicate ? html`<div class="flash warn">This looks like a repeat: the same mobile, date of birth and test were registered as <b>${duplicate.sample_id}</b> on ${fmtDate(duplicate.registered_at)}. To register again, give a reason below and save.</div>` : ''}
 <form method="post" action="/samples/new">
 <div class="card"><h2 style="margin-top:0">Test</h2><div class="grid">
@@ -181,9 +185,9 @@ ${u.role === 'admin' ? field('Discount (₹)', 'discount', v('discount', '0'), {
 <label class="check"><input type="checkbox" name="consent_data_use" value="yes" ${v('consent_data_use') === 'yes' ? raw('checked') : ''}> The patient also agrees that their anonymised data may be used to improve our services. <span class="muted">(optional)</span></label>
 <div class="grid" style="margin-top:8px">${select('How was consent taken?', 'consent_method', ['Signed form', 'Confirmed verbally by patient'], v('consent_method'), { required: true })}</div></div>
 <div class="card"><h2 style="margin-top:0">Collection</h2>
-<label class="check"><input type="checkbox" name="collected_now" value="yes" ${v('collected_now') === 'yes' ? raw('checked') : ''}> The sample is being collected and labelled now.</label>
-<div class="grid">${field('Collected by', 'collector', v('collector'), { opt: true })}</div>
-<p class="muted" style="margin-bottom:0">If the sample is collected later, leave this unticked and mark it collected from the sample's page.</p></div>
+<label class="check"><input type="checkbox" name="collected_now" value="yes" ${v('collected_now') === 'yes' ? raw('checked') : ''}> The sample is already collected (now or earlier).</label>
+<div class="grid">${field('Collected by', 'collector', v('collector'), { opt: true })}${field('Collection date and time', 'collected_at', v('collected_at'), { type: 'datetime-local', opt: true, attrs: `max="${maxLocal()}"` })}</div>
+<p class="muted" style="margin-bottom:0">Leave the date empty if it is being collected now. Registering late? Enter the real collection date, up to 30 days back. If the sample is collected later, leave this unticked and mark it collected from the sample's page.</p></div>
 ${duplicate ? html`<div class="card">${field('Reason for registering again', 'duplicate_reason', v('duplicate_reason'), { required: true })}</div>` : ''}
 <div class="actions"><button>Save registration</button><a href="/samples">Cancel</a></div></form>`);
   }
@@ -209,6 +213,14 @@ ${duplicate ? html`<div class="card">${field('Reason for registering again', 'du
       return registrationForm(ctx, b, out.duplicate);
     }
     h.redirect(ctx, `/samples/${out.sample.sample_id}`, { type: 'ok', text: `Registered. Sample ID ${out.sample.sample_id}. Print the label and stick it on the tube.` });
+  });
+
+  // Labels for several samples at once (after an Excel upload).
+  router.get('/samples/labels', (ctx) => {
+    const ids = String(ctx.query.ids || '').split(',').map((x) => x.trim()).filter(Boolean).slice(0, 500);
+    if (!ids.length) throw new UserError('No samples were chosen.');
+    const copies = labelCopies(ctx);
+    labelSheet(ctx, ids.map((id) => loadFull({ ...ctx, params: { id } })), copies, `?ids=${encodeURIComponent(ids.join(','))}&copies=${copies + 1}`);
   });
 
   // ---------- Sample page ----------
@@ -239,10 +251,11 @@ ${s.clinical_notes ? html`<dt>Clinical notes</dt><dd>${s.clinical_notes}</dd>` :
 ${isStaff(u) ? html`<dt>Processing</dt><dd>${ROUTE_LABEL[t.route]} · TAT ${t.tat_days} days from lab receipt</dd>` : ''}
 <dt>Registered by</dt><dd>${a.name} · ${regBy ? regBy.name : ''}</dd><dt>Registered</dt><dd>${fmtDateTime(s.registered_at)}</dd>
 <dt>Collected</dt><dd>${s.collected_at ? html`${fmtDateTime(s.collected_at)} by ${s.collector}` : 'Not yet'}</dd>
+<dt>Patient tracking</dt><dd><a href="${track.link(s.sample_id)}" target="_blank" rel="noopener">${track.link(s.sample_id)}</a><br><small class="muted">The patient opens it with the last 4 digits of their mobile. It is in their registration message.</small></dd>
 ${s.partner_ref ? html`<dt>Reference</dt><dd>${s.partner_ref}</dd>` : ''}${s.referring_doctor ? html`<dt>Doctor</dt><dd>${s.referring_doctor}</dd>` : ''}
 ${s.duplicate_reason ? html`<dt>Repeat reason</dt><dd>${s.duplicate_reason}</dd>` : ''}${s.cancel_reason ? html`<dt>Cancelled</dt><dd>${s.cancel_reason}</dd>` : ''}</dl>
 ${s.status === 'REGISTERED' && u.role !== 'counsellor' ? html`<form method="post" action="/samples/${s.sample_id}/collect" class="noprint" style="margin-top:16px;border-top:1px solid var(--line);padding-top:14px">
-<b>Mark as collected</b><div class="grid" style="margin-top:10px">${field('Collected by', 'collector', '', { required: true })}${field('Date and time', 'collected_at', '', { type: 'datetime-local', required: true })}</div>
+<b>Mark as collected</b><div class="grid" style="margin-top:10px">${field('Collected by', 'collector', '', { required: true })}${field('Date and time', 'collected_at', '', { type: 'datetime-local', required: true, attrs: `max="${maxLocal()}"` })}</div>
 <div class="actions"><button>Mark collected</button></div></form>` : ''}</div>`;
     const billingCard = u.role === 'counsellor' ? '' : html`<div class="card"><h2>Billing</h2>${bill ? html`<dl class="facts">
 <dt>Bill number</dt><dd class="mono">${bill.bill_no}</dd>
@@ -338,20 +351,27 @@ ${field('Pincode', 'pincode', v('pincode'), { required: true })}</div><div class
 
   // ---------- Label ----------
   // 50 x 25 mm label; prints on a label printer or on plain paper.
-  router.get('/samples/:id/label', (ctx) => {
-    const { s, p, t } = loadFull(ctx);
-    const initials = p.full_name.split(/\s+/).map((w) => w[0]).join('').toUpperCase().slice(0, 4);
-    const copies = Math.min(Math.max(Number(ctx.query.copies) || 2, 1), 6);
-    const label = html`<div class="label"><div class="bc">${raw(barcode.svg(s.sample_id, { height: 46 }))}</div>
+  // Labels: 50 x 25 mm, two per sample by default (tube and form).
+  function labelSheet(ctx, list, copies, more) {
+    const one = ({ s, p, t }) => {
+      const initials = p.full_name.split(/\s+/).map((w) => w[0]).join('').toUpperCase().slice(0, 4);
+      return html`<div class="label"><div class="bc">${raw(barcode.svg(s.sample_id, { height: 46 }))}</div>
 <div class="id">${s.sample_id}</div><div class="meta"><span>${t.short_name}</span><span>${initials} · ${fmtDate(s.registered_at)}</span></div></div>`;
-    h.raw(ctx, 'text/html; charset=utf-8', html`<!doctype html><html><head><meta charset="utf-8"><title>Label ${s.sample_id}</title><style>
+    };
+    h.raw(ctx, 'text/html; charset=utf-8', html`<!doctype html><html><head><meta charset="utf-8"><title>Label${list.length > 1 ? `s (${list.length} samples)` : ` ${list[0].s.sample_id}`}</title><style>
 @page{size:50mm 25mm;margin:0}body{margin:0;font-family:Arial,sans-serif}
 .label{width:50mm;height:25mm;padding:1.5mm 2mm;box-sizing:border-box;page-break-after:always;overflow:hidden}
 .bc svg{width:46mm;height:12mm;display:block}.id{font:bold 9pt monospace;text-align:center;margin-top:.5mm}
 .meta{display:flex;justify-content:space-between;font-size:6.5pt;margin-top:.3mm}
 .bar{font:14px system-ui;padding:10px;background:#f5f8f9;border-bottom:1px solid #ddd}@media print{.bar{display:none}}
-</style></head><body><div class="bar">Label size 50 × 25 mm. <a href="?copies=${copies + 1}">More copies</a> · <button onclick="print()">Print</button></div>
-${Array.from({ length: copies }, () => label)}<script>setTimeout(()=>print(),300)</script></body></html>`.toString());
+</style></head><body><div class="bar">Label size 50 × 25 mm${list.length > 1 ? ` · ${list.length} samples, ${copies} each` : ''}. <a href="${more}">More copies</a> · <button onclick="print()">Print</button></div>
+${list.map((x) => Array.from({ length: copies }, () => one(x)))}<script>setTimeout(()=>print(),300)</script></body></html>`.toString());
+  }
+  const labelCopies = (ctx) => Math.min(Math.max(Number(ctx.query.copies) || 2, 1), 6);
+
+  router.get('/samples/:id/label', (ctx) => {
+    const copies = labelCopies(ctx);
+    labelSheet(ctx, [loadFull(ctx)], copies, `?copies=${copies + 1}`);
   });
 
   // ---------- Bill ----------

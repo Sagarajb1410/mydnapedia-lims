@@ -52,6 +52,7 @@ DATA_DIR=$DATA
 STORAGE=local
 BACKUP_BUCKET=$BUCKET
 FIRST_ADMIN_EMAIL=$ADMIN_EMAIL
+PUBLIC_URL=https://$DOMAIN
 ENV
 cp "$APP/deploy/mydnapedia-lims.service" /etc/systemd/system/mydnapedia-lims.service
 systemctl daemon-reload
