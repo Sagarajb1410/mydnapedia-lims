@@ -240,3 +240,30 @@ G.finish=function(e,t={}){let p=G.AP.generate(e),g=p.blocks;for(let r of[/Fitnes
   assert.match(skin.find((b) => b.t === 'p').text, /steps for nutrition, prevention of risks and skin health\./);
   assert.strictEqual(skin.at(-1).t, 'closing');
 });
+
+test('a counselling form saved as PDF goes through the same reader', () => {
+  const { patchForm } = require('../src/studio-form');
+  const tool = `<label class="btn">Load a form filled in Word (.docx)<input type="file" id="w-import" accept=".docx">
+<script>function Zn(e){let t=We.openDocument(e,"application/pdf");return t}function Dp(e){let t=e.getBounds(),r={w:t[2]-t[0],h:t[3]-t[1],lines:[],images:[]};return r}
+async function vc(e){let t,r;try{t=await ls.default.loadAsync(e),r=await t.file("word/document.xml").async("string")}catch{throw new Error("That file is not a Word document (.docx).")}let n=mdpFormTables(r);return n}</script>`;
+  const out = patchForm(tool);
+  assert.ok(out.includes('Load a filled form (Word or PDF)'));
+  assert.ok(out.includes('accept=".pdf,application/pdf,.docx"'));
+  assert.ok(out.includes('if(e[0]===37&&e[1]===80&&e[2]===68&&e[3]===70)r=mdpFormPdfXml(e);else t=await ls.default.loadAsync(e)'), 'a PDF is recognised by its first bytes');
+  const fn = out.slice(out.indexOf('function mdpFormPdfXml'), out.indexOf('async function vc'));
+  assert.ok(fn.includes('Zn(bytes)') && fn.includes('Dp(doc.loadPage(i))'), 'the tool\'s own PDF reader is used');
+  // Two pages of lines, as the tool's reader gives them: patient details, a heading, the lifestyle table, a free-text answer.
+  const line = (t, x, y, bold = false) => ({ text: t, x0: x, y, size: 9, bold });
+  const pages = [[line('Patient Details', 54, 100, true), line('Patient Name', 54, 120), line('Asha Rao', 200, 120), line('A2.  Lifestyle', 50, 160, true),
+    line('Parameter', 54, 180, true), line('Field', 150, 180, true), line('Response', 300, 180, true), line('Options', 400, 180, true),
+    line('Caffeine consumption', 54, 200), line('Cups/day (tea / coffee /', 150, 200), line('3-4', 300, 200), line('0 / 1-2 / 3-4', 400, 200), line('energy)', 150, 212)],
+  [line('E1.  Top priorities discussed', 50, 100, true), line('Walk daily', 54, 120), line('Cut salt', 54, 132), line('E2.  Preventive Health Check', 50, 170, true), line('E4.  Consultations advised', 50, 200, true)]];
+  const run = new Function('mdpFormPdfXml', 'Zn', 'Dp', `${fn}; return mdpFormPdfXml;`);
+  const doc = { countPages: () => pages.length, loadPage: (i) => i };
+  const xml = run(null, () => doc, (i) => ({ h: 842, lines: pages[i] }))(new Uint8Array([37, 80, 68, 70]));
+  assert.match(xml, /<w:tc><w:p><w:r><w:t xml:space='preserve'>Patient Name<\/w:t><\/w:r><\/w:p><\/w:tc><w:tc><w:p><w:r><w:t xml:space='preserve'>Asha Rao</);
+  assert.match(xml, /Cups\/day \(tea \/ coffee \/ energy\)<\/w:t><\/w:r><\/w:p><\/w:tc><w:tc><w:p><w:r><w:t xml:space='preserve'>3-4</, 'a wrapped label stays one row');
+  assert.match(xml, /Walk daily<\/w:t><w:br\/><w:t xml:space='preserve'>Cut salt/, 'answer lines keep their line breaks');
+  assert.match(xml, /E2\. Preventive Health Check<\/w:t><\/w:r><\/w:p><w:tbl><w:tr><w:tc><w:p><w:r><w:t xml:space='preserve'><\/w:t>/, 'an empty answer box keeps its place');
+  assert.throws(() => run(null, () => ({ countPages: () => 1, loadPage: () => 0 }), () => ({ h: 842, lines: [] }))(new Uint8Array(4)), /no readable text/);
+});
