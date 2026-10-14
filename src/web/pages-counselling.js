@@ -6,6 +6,8 @@ const form = require('../counselling-form');
 const reports = require('../reports');
 const samples = require('../samples');
 const { fmtDateTime, fmtDate, UserError, istDate } = require('../util');
+// The action plan window can be opened from report release until the plan is approved.
+const PLAN_OPEN = ['REPORT_RELEASED', 'COUNSELLING_SCHEDULED', 'COUNSELLING_DONE', 'ACTION_PLAN_DRAFTED'];
 
 const PLAN_STATUS = { blocked: 'Blocked', pending: 'Waiting for approval', rejected: 'Sent back', approved: 'Approved', delivered: 'Sent to client', superseded: 'Replaced' };
 const PLAN_TONE = { blocked: 'bad', rejected: 'bad', pending: 'warn', approved: 'good', delivered: 'good' };
@@ -62,8 +64,9 @@ ${mayAct && ['REPORT_RELEASED', 'COUNSELLING_SCHEDULED'].includes(s.status) ? ht
 ${mayAct && s.status === 'COUNSELLING_SCHEDULED' ? html`<form method="post" action="/samples/${s.sample_id}/counselling/outcome" class="noprint" style="margin-top:12px;border-top:1px solid var(--line);padding-top:12px">
 <b>After the session</b><div style="margin-top:6px">${field('Note', 'note', '', { opt: true })}</div>
 <div class="actions"><button name="outcome" value="done">Session held</button><button class="light" name="outcome" value="no_show">Client did not attend</button></div></form>` : ''}
-${mayAct && counselling.FORM_OPEN.includes(s.status) ? html`<div class="actions noprint">${h.studioButton('Counselling form in Report Centre', s.sample_id, 'form', f && f.status === 'complete' ? 'light' : '')}
-${['COUNSELLING_DONE', 'ACTION_PLAN_DRAFTED'].includes(s.status) ? h.studioButton('Open action plan', s.sample_id, 'plan', f && f.status === 'complete' ? '' : 'light') : ''}
+${mayAct && PLAN_OPEN.includes(s.status) && !counselling.FORM_OPEN.includes(s.status) ? html`<div class="actions noprint">${h.studioButton('Open action plan', s.sample_id, 'plan', '')}</div>` : ''}
+${mayAct && counselling.FORM_OPEN.includes(s.status) ? html`<div class="actions noprint">${h.studioButton('Open action plan', s.sample_id, 'plan', '')}${h.studioButton('Counselling form in Report Centre', s.sample_id, 'form', f && f.status === 'complete' ? 'light' : '')}
+
 <a class="btn light" href="/samples/${s.sample_id}/counselling/form">${f ? 'Form on this screen' : 'Fill the form on this screen'}</a></div>
 <p class="muted" style="margin:6px 0 0">Report Centre opens with this client's details, saved form and the partner's results loaded. On its LIMS tab, send the counselling form, case file and action plan back here. A case sent from Report Centre also fills in the form on this screen.</p>` : ''}
 ${plans.length ? html`<h3 style="margin:16px 0 6px;font-size:15px">Action plan</h3><div class="table-wrap"><table><tr><th>File</th><th>Uploaded</th><th>Status</th></tr>
@@ -111,7 +114,7 @@ ${rows.length ? '' : html`<tr><td colspan="4" class="muted">${empty}</td></tr>`}
     const table = (rows, empty, col) => html`<div class="table-wrap"><table><tr><th>Client</th><th>Test</th><th>Counsellor</th><th>${col[0]}</th><th></th></tr>
 ${rows.map((r) => html`<tr><td><a href="/samples/${r.sample_id}">${r.full_name}</a><br><span class="mono muted">${r.sample_id}</span></td><td>${r.test_name}</td>
 <td>${r.counsellor_name || html`<span class="muted">Not assigned</span>`}</td><td>${col[1](r)}</td>
-<td>${r.status === 'COUNSELLING_DONE' || r.status === 'ACTION_PLAN_DRAFTED' ? h.studioButton('Open', r.sample_id, 'plan') : ''}</td></tr>`)}
+<td>${PLAN_OPEN.includes(r.status) ? h.studioButton('Open action plan', r.sample_id, 'plan') : ''}</td></tr>`)}
 ${rows.length ? '' : html`<tr><td colspan="5" class="muted">${empty}</td></tr>`}</table></div>`;
     const formPill = (r) => html`<span class="pill ${r.form_status === 'complete' ? 'good' : 'warn'}">${r.form_status === 'complete' ? 'Form complete' : r.form_status === 'draft' ? 'Form in draft' : 'Form not started'}</span>`;
     const st = (r) => statusPill(r.status, samples.STATUSES[r.status]);
