@@ -23,7 +23,8 @@ const FAKE = `<!doctype html><html><head><title>Report Studio</title></head><bod
 /*fetch(e.lims.url.trim(),*/
 /*key:e.lims.key.trim()*/
 /*let n=Mm(r),i=n.findIndex(R=>R[0]&&/parameter/i.test(R[0][0]||"")&&R[0].some(B=>/response/i.test(B)));if(n.length!==18||i!==4)throw new Error("not the form");*/
-/*async function vc(e){let t,r;try{t=await ls.default.loadAsync(e)*/</script></body></html>`;
+/*async function vc(e){let t,r;try{t=await ls.default.loadAsync(e)*/
+/*}function jf(){return{app:"mdp-report-studio-case",version:1,patient:st.patient(),clinical:Ee.clinical,form:Ee.form}}*/</script></body></html>`;
 
 async function withApp(fn) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lims-studio-'));
@@ -55,6 +56,10 @@ test('Report Centre is installed, renamed and linked to the LIMS', async () => {
     assert.match(page, /window\.__LIMS=\{"url":"\/studio\/api","key":"[0-9a-f]{64}","sample":"MDP00020260008","step":"convert"/);
     for (const to of ['$o=e=>!!(window.__LIMS||', 'let r=window.__LIMS?"":o2(e.lims.url)', 'fetch((window.__LIMS?window.__LIMS.url:e.lims.url).trim(),', 'key:(window.__LIMS?window.__LIMS.key:e.lims.key).trim()']) assert.ok(page.includes(to), to);
     assert.ok(page.includes('function mdpFormTables(r)'), 'counselling forms with a changed layout can be read');
+    assert.ok(page.includes('window.__mdpCase=()=>({json:jf(),result:Ee.result,stale:Ee.stale});function jf()'), 'the converted case can be read by the LIMS');
+    const opener = [...page.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]).find((t) => t.includes('function keepCase'));
+    assert.ok(opener, 'a conversion opened from a sample is saved in the LIMS by itself');
+    assert.doesNotThrow(() => new Function(opener), 'the opener script is valid');
     const partner = await signIn(base, 'sunrise@demo.example');
     assert.notStrictEqual((await fetch(`${base}/studio`, { headers: { cookie: partner }, redirect: 'manual' })).status, 200);
 
@@ -128,6 +133,11 @@ test('the action plan reopens with the saved results and the counsellor\'s lates
     assert.strictEqual(String(back.form.heightCm), '168');
     assert.strictEqual(back.form.life.diet, 'Vegetarian');
     assert.strictEqual(back.form.priorities, 'Walk daily');
+    // Converting again saves a newer case with no answers; the counsellor's answers still fill it.
+    await new Promise((r) => setTimeout(r, 20));
+    assert.ok((await call({ action: 'push', sampleId: 'MDP00020260014', kind: 'case', name: 'case.json', mime: 'application/json', b64: Buffer.from(JSON.stringify({ ...c, form: {} })).toString('base64') })).ok);
+    const again = JSON.parse((await call({ action: 'loadCase', sampleId: 'MDP00020260014' })).data.json);
+    assert.strictEqual(String(again.form.heightCm), '168');
   });
 });
 

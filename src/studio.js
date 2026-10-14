@@ -79,6 +79,15 @@ function productFor(db, sampleId) {
 
 const SKIN_CARE_RE = /(skin:\{id:"skin",[^}]*?)care:!1\}/;
 
+// Lets the LIMS read the tool's case (results and answers) and whether a fresh
+// report has been converted, so a conversion opened from a sample is saved in
+// the LIMS by itself. The action plan is then made later from that saved case,
+// without converting the report again.
+const CASE_RE = /function ([\w$]+)\(\)\{return\{app:"mdp-report-studio-case",[^}]*?clinical:([\w$]+)\.clinical/;
+function exposeCase(text) {
+  return text.replace(CASE_RE, (m, fn, state) => `window.__mdpCase=()=>({json:${fn}(),result:${state}.result,stale:${state}.stale});${m}`);
+}
+
 const linkable = (text) => LINK_PATCHES.every(([re]) => re.test(text));
 
 function looksLikeStudio(text) {
@@ -141,7 +150,7 @@ function base(db, storage, tool = 'main') {
   // Reads counselling forms whose layout was changed in Word (see studio-form.js).
   text = patchForm(text);
   // Each action plan fits its own test (see studio-plan.js).
-  text = scopePlan(text);
+  text = exposeCase(scopePlan(text));
   if (tool === 'main') text = useProduct(guardSkin(text));
   // The Skin Health copy was made without the counselling form and action plan
   // tabs. Every test gets an action plan, so they are switched on.
@@ -210,12 +219,20 @@ async function loadPdf(){
   var dt=new DataTransfer();dt.items.add(new File([blob],name,{type:'application/pdf'}));
   var pick=$('#pick');pick.files=dt.files;pick.dispatchEvent(new Event('change',{bubbles:true}));await pause(3000);return true;
 }
+function note(text,good){var n=document.getElementById('mdp-note');if(!n){n=document.createElement('div');n.id='mdp-note';n.style.cssText='position:fixed;right:16px;bottom:16px;max-width:380px;z-index:9999;padding:10px 14px;border-radius:8px;font:14px/1.4 system-ui,sans-serif;box-shadow:0 4px 16px rgba(0,0,0,.2)';document.body.appendChild(n)}n.style.background=good?'#e7f6ec':'#fff4e0';n.style.color=good?'#14532d':'#7c2d12';n.textContent=text;if(good)setTimeout(function(){n.remove()},8000)}
+// Each new conversion is saved in the LIMS as the sample's case.
+function keepCase(){var last=null;setInterval(async function(){
+  if(!window.__mdpCase)return;var c=window.__mdpCase();if(!c.result||c.stale||c.result===last||!c.json.clinical)return;last=c.result;
+  try{var bytes=new TextEncoder().encode(JSON.stringify(c.json)),bin='';for(var i=0;i<bytes.length;i+=8192)bin+=String.fromCharCode.apply(null,bytes.subarray(i,i+8192));
+    var r=await(await fetch(L.url,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify({action:'push',sampleId:L.sample,kind:'case',name:L.sample+'_case.json',mime:'application/json',b64:btoa(bin),key:L.key})})).json();
+    if(!r.ok)throw new Error(r.error||'refused');note('Saved in the LIMS. The action plan can be made later without converting again.',true);
+  }catch(e){last=null;console.warn('Report Centre: could not save the case',e)}},3000)}
 async function run(){
   await wait(function(){var b=$('#boot');return !b||b.hidden||getComputedStyle(b).display==='none'},60000);
   if(L.step==='convert')await loadPdf();
   tab('lims');var id=await wait(function(){return $('#l-id')},5000);id.value=L.sample;
   $('#l-find').click();await wait(function(){var f=$('#l-found');return f&&!f.hidden},15000);
-  if(L.step==='convert'){$('#l-use').click();tab('convert');return;}
+  if(L.step==='convert'){$('#l-use').click();tab('convert');keepCase();return;}
   var c=$('#l-case');if(c&&!c.hidden){c.click();await pause(300);if(c.dataset.armed)c.click();await pause(1500);}
   else $('#l-use').click();
   // The saved case already has the results: no need to read the partner's PDF again.
@@ -223,6 +240,7 @@ async function run(){
     tab('lims');c.click();await pause(300);if(c.dataset.armed)c.click();await pause(1500);
   }
   tab(L.step==='plan'?'plan':'form');
+  if(L.step==='plan'&&!L.results&&!/No client open/.test(($('#caseName')||{}).textContent||'')&&!(window.__mdpCase&&window.__mdpCase().json.clinical))note('The converted report for this sample is not saved in the LIMS yet. Ask the lab to open it once with "Convert in Report Centre" on the report page of this sample. After that the action plan opens here directly.');
 }
 run().catch(function(e){console.warn('Report Centre: could not open the sample automatically',e)});
 })();`;
@@ -252,9 +270,12 @@ function caseFor(db, storage, user, s) {
   if (!saved) return counsellingRole && counselling.STAGES.includes(s.status) ? JSON.stringify(counselling.caseFile(db, user, s.sample_id)) : null;
   const json = storage.get(saved.file_key).toString('utf8');
   const lims = counsellingRole ? counselling.loadForm(db, s.id) : null;
-  if (!lims || lims.updated_at <= saved.uploaded_at || !counselling.STAGES.includes(s.status)) return json;
+  if (!lims || !counselling.STAGES.includes(s.status)) return json;
   let c;
   try { c = JSON.parse(json); } catch { return json; }
+  // A case saved at conversion carries no answers yet, so the LIMS form fills it whenever it was saved.
+  const noAnswers = !c.form || !form.FIELDS.some((f) => { const v = form.get(c.form, f.key); return v != null && v !== '' && !(Array.isArray(v) && !v.length); });
+  if (lims.updated_at <= saved.uploaded_at && !noAnswers) return json;
   const fresh = counselling.caseFile(db, user, s.sample_id);
   const merged = { ...(c.form || {}), life: { ...((c.form || {}).life || {}) } };
   for (const f of form.FIELDS) {
