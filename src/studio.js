@@ -84,8 +84,18 @@ const SKIN_CARE_RE = /(skin:\{id:"skin",[^}]*?)care:!1\}/;
 // the LIMS by itself. The action plan is then made later from that saved case,
 // without converting the report again.
 const CASE_RE = /function ([\w$]+)\(\)\{return\{app:"mdp-report-studio-case",[^}]*?clinical:([\w$]+)\.clinical/;
+// The action plan window also opens a case it puts together itself (the
+// counsellor's answers with the results read from the white-labelled report).
+const OPEN_CASE_RE = /function ([\w$]+)\(e\)\{if\(e\.app!=="mdp-report-studio-case"/;
+// The tool reads results only from the partner's original PDF. In the action
+// plan window it also reads them from our own white-labelled report, whose
+// result pages are the partner's pages re-branded.
+const READ_CONVERTED_RE = /clinical:([\w$]+)\|\|!([\w$]+)\.some\(([\w$]+)=>\3\.footer\)\?null:/;
 function exposeCase(text) {
-  return text.replace(CASE_RE, (m, fn, state) => `window.__mdpCase=()=>({json:${fn}(),result:${state}.result,stale:${state}.stale});${m}`);
+  return text
+    .replace(CASE_RE, (m, fn, state) => `window.__mdpCase=()=>({json:${fn}(),result:${state}.result,stale:${state}.stale});${m}`)
+    .replace(OPEN_CASE_RE, (m, fn) => `window.__mdpOpenCase=e=>${fn}(e);${m}`)
+    .replace(READ_CONVERTED_RE, (m, conv, pages, pg) => `clinical:(${conv}&&!window.__mdpPlanWin)||!${pages}.some(${pg}=>${pg}.footer)?null:`);
 }
 
 const linkable = (text) => LINK_PATCHES.every(([re]) => re.test(text));
@@ -198,11 +208,20 @@ function page(db, storage, user, { sample, step, tool } = {}) {
   const b = base(db, storage, toolFor(db, storage, user, sample, step, tool));
   if (!b) return null;
   const head = b.linked
-    ? `<script>window.__LIMS=${js({ url: '/studio/api', key: keyFor(db, user), sample: sample || '', step: step || '', role: user.role, results: hasResults(db, storage, user, sample), product: productFor(db, sample), skin: Boolean(source(storage, 'skin')) })};</script>`
+    ? `<script>window.__LIMS=${js({ url: '/studio/api', key: keyFor(db, user), sample: sample || '', step: step || '', role: user.role, planWindow: Boolean(sample && step === 'plan'), results: hasResults(db, storage, user, sample), product: productFor(db, sample), skin: Boolean(source(storage, 'skin')) })};</script>`
     : '';
-  const tail = b.linked && sample ? `<script>${OPENER}</script>` : '';
+  const planWin = b.linked && sample && step === 'plan';
+  const tail = (planWin ? PLAN_WINDOW : '') + (b.linked && sample ? `<script>${OPENER}</script>` : '');
   return b.text.replace('<head>', () => `<head>${head}`).replace('</body>', () => `${tail}</body>`);
 }
+
+// The action plan window: the white-labelled report and the counselling form
+// side by side with the plan. Converting and the invite email stay in the full
+// Report Centre; here only the form, the plan and the LIMS tabs are shown.
+const PLAN_WINDOW = `<style>[role=tab][data-tab=convert],[role=tab][data-tab=email],[role=tab][data-tab=spelling]{display:none!important}
+#mdp-planbar{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;padding:10px 16px;background:#fff8e6;border-bottom:1px solid #f1d9a0;font:14px/1.4 system-ui,sans-serif;color:#3b2f12}
+#mdp-planbar b{font-size:15px}#mdp-planbar label{cursor:pointer;padding:5px 12px;border-radius:6px;background:#f9b300;color:#1f2937;font-weight:600}#mdp-planbar input{display:none}</style>
+<script>window.__mdpPlanWin=true;document.title='Action plan · '+(window.__LIMS&&window.__LIMS.sample||'');</script>`;
 
 // Runs inside the tool when it is opened on a sample: loads the partner's PDF
 // (for lab staff) and the client's details or saved case from the LIMS, so
@@ -227,8 +246,38 @@ function keepCase(){var last=null;setInterval(async function(){
     var r=await(await fetch(L.url,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify({action:'push',sampleId:L.sample,kind:'case',name:L.sample+'_case.json',mime:'application/json',b64:btoa(bin),key:L.key})})).json();
     if(!r.ok)throw new Error(r.error||'refused');note('Saved in the LIMS. The action plan can be made later without converting again.',true);
   }catch(e){last=null;console.warn('Report Centre: could not save the case',e)}},3000)}
+// The action plan window. The client and the counsellor's answers come from
+// the LIMS; the results are read from the white-labelled report.
+function bar(){var b=document.createElement('div');b.id='mdp-planbar';
+  b.innerHTML='<b>Action plan</b><span>White-labelled report: <span id="mdp-rep">loading\u2026</span></span><label>Choose the white-labelled PDF<input type="file" accept="application/pdf,.pdf" id="mdp-pick"></label><span style="opacity:.8">Edit the answers on the Counselling form tab, then open the Action plan tab.</span>';
+  document.body.insertBefore(b,document.body.firstChild);
+  $('#mdp-pick').addEventListener('change',function(){var f=this.files[0];this.value='';if(f)useReport(f,f.name).then(function(ok){if(ok)tab('plan')})});}
+function rep(text){var r=$('#mdp-rep');if(r)r.textContent=text}
+async function useReport(blob,name){
+  var keep=window.__mdpCase?window.__mdpCase().json:null;rep('reading '+name+'\u2026');
+  var w=$('#tplWarn');if(w)w.hidden=true;var t0=JSON.stringify((window.__mdpCase&&window.__mdpCase().json.clinical)||null);
+  var dt=new DataTransfer();dt.items.add(new File([blob],name,{type:'application/pdf'}));var pick=$('#pick');pick.files=dt.files;pick.dispatchEvent(new Event('change',{bubbles:true}));
+  try{await wait(function(){var w=$('#tplWarn');return (w&&!w.hidden)||!$('#details')||!$('#details').hidden},30000)}catch(e){}
+  await pause(300);
+  var got=window.__mdpCase?window.__mdpCase().json:null,rows=got&&got.clinical&&got.clinical.rows?got.clinical.rows.length:0;
+  var c=keep&&keep.patient&&keep.patient.name?keep:got;
+  if(!rows){if(keep&&keep.patient&&keep.patient.name)window.__mdpOpenCase(keep);rep(name+': no results could be read. Use the PDF made by Report Centre (not a scan or a picture-only file).');return false}
+  window.__mdpOpenCase(Object.assign({},c,{clinical:got.clinical}));
+  rep(name+' \u2713 '+rows+' result'+(rows>1?'s':'')+' read');return true;
+}
+async function planWindow(){
+  bar();
+  tab('lims');var id=await wait(function(){return $('#l-id')},5000);id.value=L.sample;
+  $('#l-find').click();await wait(function(){var f=$('#l-found');return f&&!f.hidden},15000);
+  var c=$('#l-case');if(c&&!c.hidden){c.click();await pause(300);if(c.dataset.armed)c.click();await pause(1500);}else $('#l-use').click();
+  var r=await fetch('/studio/branded/'+encodeURIComponent(L.sample),{credentials:'same-origin'});
+  if(r.ok){await useReport(await r.blob(),decodeURIComponent(r.headers.get('X-File-Name')||'report.pdf'))}
+  else rep(window.__mdpCase&&window.__mdpCase().json.clinical?'not in the LIMS yet; using the results saved at conversion':'not in the LIMS yet. Choose the PDF here.');
+  tab('form');
+}
 async function run(){
   await wait(function(){var b=$('#boot');return !b||b.hidden||getComputedStyle(b).display==='none'},60000);
+  if(L.planWindow){await planWindow();return;}
   if(L.step==='convert')await loadPdf();
   tab('lims');var id=await wait(function(){return $('#l-id')},5000);id.value=L.sample;
   $('#l-find').click();await wait(function(){var f=$('#l-found');return f&&!f.hidden},15000);
@@ -240,7 +289,6 @@ async function run(){
     tab('lims');c.click();await pause(300);if(c.dataset.armed)c.click();await pause(1500);
   }
   tab(L.step==='plan'?'plan':'form');
-  if(L.step==='plan'&&!L.results&&!/No client open/.test(($('#caseName')||{}).textContent||'')&&!(window.__mdpCase&&window.__mdpCase().json.clinical))note('The converted report for this sample is not saved in the LIMS yet. Ask the lab to open it once with "Convert in Report Centre" on the report page of this sample. After that the action plan opens here directly.');
 }
 run().catch(function(e){console.warn('Report Centre: could not open the sample automatically',e)});
 })();`;

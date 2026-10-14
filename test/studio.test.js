@@ -24,7 +24,9 @@ const FAKE = `<!doctype html><html><head><title>Report Studio</title></head><bod
 /*key:e.lims.key.trim()*/
 /*let n=Mm(r),i=n.findIndex(R=>R[0]&&/parameter/i.test(R[0][0]||"")&&R[0].some(B=>/response/i.test(B)));if(n.length!==18||i!==4)throw new Error("not the form");*/
 /*async function vc(e){let t,r;try{t=await ls.default.loadAsync(e)*/
-/*}function jf(){return{app:"mdp-report-studio-case",version:1,patient:st.patient(),clinical:Ee.clinical,form:Ee.form}}*/</script></body></html>`;
+/*}function jf(){return{app:"mdp-report-studio-case",version:1,patient:st.patient(),clinical:Ee.clinical,form:Ee.form}}*/
+/*}function jo(e){if(e.app!=="mdp-report-studio-case"||!e.patient)throw 0}*/
+/*return{alreadyConverted:a,clinical:a||!n.some(s=>s.footer)?null:wl(r,n)}*/</script></body></html>`;
 
 async function withApp(fn) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lims-studio-'));
@@ -72,6 +74,14 @@ test('Report Centre is installed, renamed and linked to the LIMS', async () => {
     assert.strictEqual(found.data.sample.sampleId, 'MDP00020260008');
     assert.strictEqual(found.data.stage, 'Partner report received');
     assert.deepStrictEqual((await call({ action: 'find', sampleId: 'MDP00020269999' })).ok, false);
+    // The action plan window reads the results from our white-labelled report.
+    const planPage = await (await fetch(`${base}/studio?sample=MDP00020260008&step=plan`, { headers: { cookie } })).text();
+    assert.match(planPage, /"planWindow":true/);
+    assert.ok(planPage.includes('window.__mdpPlanWin=true'), 'the plan window shows only the form, plan and LIMS tabs');
+    assert.ok(planPage.includes('clinical:(a&&!window.__mdpPlanWin)||!n.some(s=>s.footer)?null:'), 'results are read from a converted report there');
+    assert.ok(planPage.includes('window.__mdpOpenCase=e=>jo(e);function jo(e)'));
+    assert.ok(!page.includes('window.__mdpPlanWin=true'), 'the full Report Centre is unchanged');
+    assert.strictEqual((await fetch(`${base}/studio/branded/MDP00020260008`, { headers: { cookie } })).status, 404, 'no white-labelled report yet');
     assert.match((await (await fetch(`${base}/studio/api`, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify({ action: 'ping', key: 'nope' }) })).json()).error, /expired/);
 
     const s = d.get("SELECT * FROM samples WHERE sample_id = 'MDP00020260008'");
@@ -83,6 +93,9 @@ test('Report Centre is installed, renamed and linked to the LIMS', async () => {
     const good = await call({ action: 'push', sampleId: s.sample_id, kind: 'report', name: 'r.pdf', mime: 'application/pdf', b64: pdf(['MyDNAPedia', `Name: ${p.full_name}  Sample ID: ${s.sample_id}`, 'Your Genetic Result']) });
     assert.ok(good.ok, good.error);
     assert.strictEqual(d.get('SELECT status FROM samples WHERE id = ?', s.id).status, 'REPORT_WHITE_LABELLED');
+    const branded = await fetch(`${base}/studio/branded/MDP00020260008`, { headers: { cookie } });
+    assert.strictEqual(branded.status, 200, 'the plan window can load the white-labelled report');
+    assert.strictEqual(branded.headers.get('content-type'), 'application/pdf');
   });
 });
 

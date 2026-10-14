@@ -63,7 +63,7 @@ ${mayAct && s.status === 'COUNSELLING_SCHEDULED' ? html`<form method="post" acti
 <b>After the session</b><div style="margin-top:6px">${field('Note', 'note', '', { opt: true })}</div>
 <div class="actions"><button name="outcome" value="done">Session held</button><button class="light" name="outcome" value="no_show">Client did not attend</button></div></form>` : ''}
 ${mayAct && counselling.FORM_OPEN.includes(s.status) ? html`<div class="actions noprint">${h.studioButton('Counselling form in Report Centre', s.sample_id, 'form', f && f.status === 'complete' ? 'light' : '')}
-${['COUNSELLING_DONE', 'ACTION_PLAN_DRAFTED'].includes(s.status) ? h.studioButton('Action plan in Report Centre', s.sample_id, 'plan', f && f.status === 'complete' ? '' : 'light') : ''}
+${['COUNSELLING_DONE', 'ACTION_PLAN_DRAFTED'].includes(s.status) ? h.studioButton('Open action plan', s.sample_id, 'plan', f && f.status === 'complete' ? '' : 'light') : ''}
 <a class="btn light" href="/samples/${s.sample_id}/counselling/form">${f ? 'Form on this screen' : 'Fill the form on this screen'}</a></div>
 <p class="muted" style="margin:6px 0 0">Report Centre opens with this client's details, saved form and the partner's results loaded. On its LIMS tab, send the counselling form, case file and action plan back here. A case sent from Report Centre also fills in the form on this screen.</p>` : ''}
 ${plans.length ? html`<h3 style="margin:16px 0 6px;font-size:15px">Action plan</h3><div class="table-wrap"><table><tr><th>File</th><th>Uploaded</th><th>Status</th></tr>

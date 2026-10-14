@@ -33,6 +33,15 @@ module.exports = function (router, { db, storage }, h) {
     h.raw(ctx, 'application/pdf', storage.get(r.file_key), { 'X-File-Name': encodeURIComponent(r.file_name || 'partner-report.pdf'), 'X-Content-Type-Options': 'nosniff' });
   });
 
+  // Our white-labelled report, read by the action plan window for the results.
+  router.get('/studio/branded/:id', (ctx) => {
+    if (!ROLES.includes(ctx.user.role)) throw new UserError('Not allowed.');
+    const s = samples.load(db, ctx.user, ctx.params.id);
+    const r = reports.forSample(db, s.id).find((x) => x.kind === 'branded' && !['superseded', 'blocked'].includes(x.status) && reports.canOpen(ctx.user, x, s));
+    if (!r) { ctx.res.writeHead(404); ctx.res.end(); return; }
+    h.raw(ctx, 'application/pdf', storage.get(r.file_key), { 'X-File-Name': encodeURIComponent(r.file_name || `${s.sample_id}.pdf`), 'X-Content-Type-Options': 'nosniff' });
+  });
+
   // The tool's own LIMS protocol. It sends a sign-in key instead of the cookie.
   router.post('/studio/api', (ctx) => {
     const reply = (obj, status = 200) => {
