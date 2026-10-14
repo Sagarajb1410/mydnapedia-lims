@@ -115,7 +115,7 @@ function patchForm(text) {
   if (!open || !lines) return text;
   const pdf = PDF_READER.replace(/\n/g, '').replace('__OPEN__', () => open[1]).replace('__LINES__', () => lines[1]);
   return text
-    .replace(/(async function [\w$]+\(e\)\{let t,r;try\{)(t=await [\w$]+\.default\.loadAsync\(e\))/, (m, a, b) => `window.__mdpFormPdfXml=b=>mdpFormPdfXml(b);${pdf}${a}if(e[0]===37&&e[1]===80&&e[2]===68&&e[3]===70)r=mdpFormPdfXml(e);else ${b}`)
+    .replace(/(async function [\w$]+\(e\)\{let t,r;try\{)(t=await [\w$]+\.default\.loadAsync\(e\))/, (m, a, b) => `window.__mdpFormPdfXml=b=>mdpFormPdfXml(b);window.__mdpReadForm=b=>${/function ([\w$]+)/.exec(a)[1]}(b);${pdf}${a}if(e[0]===37&&e[1]===80&&e[2]===68&&e[3]===70)r=mdpFormPdfXml(e);else ${b}`)
     .replace('catch{throw new Error("That file is not a Word document (.docx).")}', 'catch(x){throw new Error(/no readable text/.test(x&&x.message)?x.message:"That file is not the counselling form in Word (.docx) or PDF.")}')
     .replace('Load a form filled in Word (.docx)', 'Load a filled form (Word or PDF)')
     .replace(/(id="w-import" accept=")/, '$1.pdf,application/pdf,');

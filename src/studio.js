@@ -53,7 +53,7 @@ const ANALYSE_RE = /return\{pages:([\w$]+),fields:([\w$]+),converted:([\w$]+)\}\
 const SKIN_REFUSAL = 'This is a Skin Health report. Convert it in Skin Health Studio: open it from the client\'s Skin Health sample in the LIMS, or use the Skin Health button on the Reports screen.';
 function guardSkin(text) {
   // Opened on a sample, it hands over to the Skin Health copy, which loads the partner's PDF itself.
-  const handOver = 'if(window.__LIMS&&window.__LIMS.sample&&window.__LIMS.skin&&!window.__mdpSkinGo){window.__mdpSkinGo=1;location.href="/studio?sample="+encodeURIComponent(window.__LIMS.sample)+"&step=convert&tool=skin";throw new Error("This is a Skin Health report. Opening Skin Health Studio\u2026")}';
+  const handOver = 'if(window.__mdpPlanWin&&window.__LIMS&&window.__LIMS.skin){location.href="/studio?step=plan&tool=skin"+(window.__LIMS.sample?"&sample="+encodeURIComponent(window.__LIMS.sample):"");throw new Error("This is a Skin Health report. Opening the Skin Health action plan window; add the two files there.")}if(window.__LIMS&&window.__LIMS.sample&&window.__LIMS.skin&&!window.__mdpSkinGo){window.__mdpSkinGo=1;location.href="/studio?sample="+encodeURIComponent(window.__LIMS.sample)+"&step=convert&tool=skin";throw new Error("This is a Skin Health report. Opening Skin Health Studio\u2026")}';
   return text.replace(ANALYSE_RE, (m, pages) => `if(new Set(${pages}.flatMap(x=>(x.body||[]).map(g=>String(g.text||"").trim()).filter(g=>${SKIN_HEADINGS}.test(g)))).size>=2){${handOver}throw new Error(${JSON.stringify(SKIN_REFUSAL)})}${m}`);
 }
 
@@ -205,23 +205,31 @@ function hasResults(db, storage, user, sampleId) {
 
 // The page for one person, optionally opened on one sample.
 function page(db, storage, user, { sample, step, tool } = {}) {
-  const b = base(db, storage, toolFor(db, storage, user, sample, step, tool));
+  const toolName = toolFor(db, storage, user, sample, step, tool);
+  const b = base(db, storage, toolName);
   if (!b) return null;
   const head = b.linked
-    ? `<script>window.__LIMS=${js({ url: '/studio/api', key: keyFor(db, user), sample: sample || '', step: step || '', role: user.role, planWindow: Boolean(sample && step === 'plan'), results: hasResults(db, storage, user, sample), product: productFor(db, sample), skin: Boolean(source(storage, 'skin')) })};</script>`
+    ? `<script>window.__LIMS=${js({ url: '/studio/api', key: keyFor(db, user), sample: sample || '', step: step || '', role: user.role, planWindow: step === 'plan', tool: toolName, results: hasResults(db, storage, user, sample), product: productFor(db, sample), skin: Boolean(source(storage, 'skin')) })};</script>`
     : '';
-  const planWin = b.linked && sample && step === 'plan';
-  const tail = (planWin ? PLAN_WINDOW : '') + (b.linked && sample ? `<script>${OPENER}</script>` : '');
+  const planWin = b.linked && step === 'plan';
+  const tail = (planWin ? PLAN_WINDOW : '') + (b.linked && (sample || planWin) ? `<script>${OPENER}</script>` : '');
   return b.text.replace('<head>', () => `<head>${head}`).replace('</body>', () => `${tail}</body>`);
 }
 
 // The action plan window: the white-labelled report and the counselling form
 // side by side with the plan. Converting and the invite email stay in the full
 // Report Centre; here only the form, the plan and the LIMS tabs are shown.
-const PLAN_WINDOW = `<style>[role=tab][data-tab=convert],[role=tab][data-tab=email],[role=tab][data-tab=spelling]{display:none!important}
-#mdp-planbar{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;padding:10px 16px;background:#fff8e6;border-bottom:1px solid #f1d9a0;font:14px/1.4 system-ui,sans-serif;color:#3b2f12}
-#mdp-planbar b{font-size:15px}#mdp-planbar label{cursor:pointer;padding:5px 12px;border-radius:6px;background:#f9b300;color:#1f2937;font-weight:600}#mdp-planbar input{display:none}</style>
-<script>window.__mdpPlanWin=true;document.title='Action plan · '+(window.__LIMS&&window.__LIMS.sample||'');</script>`;
+const PLAN_WINDOW = `<style>[role=tab][data-tab=convert],[role=tab][data-tab=email],[role=tab][data-tab=spelling],[role=tab][data-tab=settings]{display:none!important}
+#mdp-plan{padding:16px 20px;background:#fffaf0;border-bottom:1px solid #f1d9a0;font:14px/1.45 Montserrat,system-ui,sans-serif;color:#1f2937}
+.mdp-head b{font-size:18px;margin-right:10px}.mdp-head span{color:#6b7280}
+.mdp-steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin-top:12px}
+.mdp-step{display:flex;gap:10px;align-items:center;background:#fff;border:1px solid #eee2c4;border-radius:10px;padding:12px}.mdp-step>div{flex:1;min-width:0}
+.mdp-n{flex:none;width:26px;height:26px;border-radius:50%;background:#f9b300;color:#1f2937;font-weight:700;display:grid;place-items:center}
+#mdp-plan .st{font-size:13px;color:#6b7280;overflow-wrap:anywhere}#mdp-plan .st.ok{color:#15803d}#mdp-plan .st.bad{color:#b91c1c}
+.mdp-btn,#mdp-make{flex:none;cursor:pointer;padding:7px 14px;border-radius:8px;border:1px solid #d1d5db;background:#fff;font:600 13px Montserrat,system-ui,sans-serif;color:#1f2937}
+#mdp-make{background:#f9b300;border-color:#f9b300}.mdp-btn input{display:none}#mdp-tier{margin-top:4px;padding:4px 6px;border-radius:6px;border:1px solid #d1d5db}
+#mdp-msg{margin-top:10px;font-size:14px}</style>
+<script>window.__mdpPlanWin=true;document.title='Action plan'+(window.__LIMS&&window.__LIMS.sample?' · '+window.__LIMS.sample:'');</script>`;
 
 // Runs inside the tool when it is opened on a sample: loads the partner's PDF
 // (for lab staff) and the client's details or saved case from the LIMS, so
@@ -246,33 +254,66 @@ function keepCase(){var last=null;setInterval(async function(){
     var r=await(await fetch(L.url,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify({action:'push',sampleId:L.sample,kind:'case',name:L.sample+'_case.json',mime:'application/json',b64:btoa(bin),key:L.key})})).json();
     if(!r.ok)throw new Error(r.error||'refused');note('Saved in the LIMS. The action plan can be made later without converting again.',true);
   }catch(e){last=null;console.warn('Report Centre: could not save the case',e)}},3000)}
-// The action plan window. The client and the counsellor's answers come from
-// the LIMS; the results are read from the white-labelled report.
-function bar(){var b=document.createElement('div');b.id='mdp-planbar';
-  b.innerHTML='<b>Action plan</b><span>White-labelled report: <span id="mdp-rep">loading\u2026</span></span><label>Choose the white-labelled PDF<input type="file" accept="application/pdf,.pdf" id="mdp-pick"></label><span style="opacity:.8">Edit the answers on the Counselling form tab, then open the Action plan tab.</span>';
-  document.body.insertBefore(b,document.body.firstChild);
-  $('#mdp-pick').addEventListener('change',function(){var f=this.files[0];this.value='';if(f)useReport(f,f.name).then(function(ok){if(ok)tab('plan')})});}
-function rep(text){var r=$('#mdp-rep');if(r)r.textContent=text}
+// The action plan window: one screen where the white-labelled report and the
+// counsellor's filled form go in and the action plan comes out. Opened on a
+// sample, both are filled in from the LIMS when it has them.
+function say(id,text,ok){var r=$(id);if(r){r.textContent=text;r.className='st'+(ok===true?' ok':ok===false?' bad':'')}}
+function answers(f){var n=0;if(!f)return 0;for(var k in f){var v=f[k];if(k==='life'){for(var j in v)if(v[j])n++}else if(Array.isArray(v)?v.length:v)n++}return n}
+function current(){return window.__mdpCase?window.__mdpCase().json:null}
+function panel(){document.title='Action plan'+(L.sample?' · '+L.sample:'');var d=document.createElement('div');d.id='mdp-plan';var t=L.product?L.product.short:(L.tool==='skin'?'Skin Health':'360 Premium');
+  d.innerHTML='<div class="mdp-head"><b>Action plan</b><span>Add the white-labelled report and the counsellor’s filled form, then create the plan.</span></div>'
+  +'<div class="mdp-steps"><div class="mdp-step"><span class="mdp-n">1</span><div><b>White-labelled report (PDF)</b><div id="mdp-rep" class="st">Not added yet</div></div><label class="mdp-btn">Choose PDF<input type="file" id="mdp-pick" accept="application/pdf,.pdf"></label></div>'
+  +'<div class="mdp-step"><span class="mdp-n">2</span><div><b>Counsellor’s filled form (Word or PDF)</b><div id="mdp-frm" class="st">Not added yet</div></div><label class="mdp-btn">Choose file<input type="file" id="mdp-form" accept=".docx,.pdf,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"></label></div>'
+  +'<div class="mdp-step"><span class="mdp-n">3</span><div><b>Test</b><div class="st"><select id="mdp-tier">'+['360 Premium','Fitness','Cardiac Health','Skin Health'].map(function(x){return '<option'+(x===t?' selected':'')+'>'+x+'</option>'}).join('')+'</select></div></div><button type="button" id="mdp-make">Create action plan</button></div></div>'
+  +'<div id="mdp-msg" class="st"></div>';
+  document.body.insertBefore(d,document.body.firstChild);
+  var lbl=document.querySelector('[role=tab][data-tab="form"]');if(lbl)lbl.textContent='Check answers';
+  $('#mdp-pick').addEventListener('change',function(){var f=this.files[0];this.value='';if(f)useReport(f,f.name)});
+  $('#mdp-form').addEventListener('change',function(){var f=this.files[0];this.value='';if(f)useForm(f)});
+  $('#mdp-tier').addEventListener('change',function(){var v=this.value;if((v==='Skin Health')!==(L.tool==='skin')){location.href='/studio?step=plan'+(v==='Skin Health'?'&tool=skin':'')+(L.sample?'&sample='+encodeURIComponent(L.sample):'')}});
+  $('#mdp-make').addEventListener('click',make);}
 async function useReport(blob,name){
-  var keep=window.__mdpCase?window.__mdpCase().json:null;rep('reading '+name+'\u2026');
-  var w=$('#tplWarn');if(w)w.hidden=true;var t0=JSON.stringify((window.__mdpCase&&window.__mdpCase().json.clinical)||null);
+  var keep=current();say('#mdp-rep','Reading '+name+'…');
+  var w=$('#tplWarn');if(w)w.hidden=true;
   var dt=new DataTransfer();dt.items.add(new File([blob],name,{type:'application/pdf'}));var pick=$('#pick');pick.files=dt.files;pick.dispatchEvent(new Event('change',{bubbles:true}));
   try{await wait(function(){var w=$('#tplWarn');return (w&&!w.hidden)||!$('#details')||!$('#details').hidden},30000)}catch(e){}
   await pause(300);
-  var got=window.__mdpCase?window.__mdpCase().json:null,rows=got&&got.clinical&&got.clinical.rows?got.clinical.rows.length:0;
-  var c=keep&&keep.patient&&keep.patient.name?keep:got;
-  if(!rows){if(keep&&keep.patient&&keep.patient.name)window.__mdpOpenCase(keep);rep(name+': no results could be read. Use the PDF made by Report Centre (not a scan or a picture-only file).');return false}
-  window.__mdpOpenCase(Object.assign({},c,{clinical:got.clinical}));
-  rep(name+' \u2713 '+rows+' result'+(rows>1?'s':'')+' read');return true;
+  var got=current(),rows=got&&got.clinical&&got.clinical.rows?got.clinical.rows.length:0;
+  if(!rows){if(keep&&keep.patient&&keep.patient.name)window.__mdpOpenCase(keep);say('#mdp-rep',name+': no results could be read. Use the PDF made by Report Centre, not a scan or a picture-only file.',false);return false}
+  var c=keep&&keep.patient&&keep.patient.name?keep:got,p=Object.assign({},c.patient||{});
+  for(var k in got.patient||{})if(!p[k]&&got.patient[k])p[k]=got.patient[k];
+  window.__mdpOpenCase(Object.assign({},c,{patient:p,clinical:got.clinical}));say('#mdp-msg','');
+  say('#mdp-rep',name+' ✓ '+rows+' result'+(rows>1?'s':'')+' read'+(p.name?' for '+p.name:''),true);return true;
+}
+async function useForm(file){
+  say('#mdp-frm','Reading '+file.name+'…');
+  try{var res=await window.__mdpReadForm(new Uint8Array(await file.arrayBuffer()))}catch(e){say('#mdp-frm',file.name+': '+String(e.message||e),false);return false}
+  if(!res.answered){say('#mdp-frm',file.name+': this copy of the form has no answers yet.',false);return false}
+  var cur=current(),p=Object.assign({},cur.patient||{}),q=res.patient||{},norm=function(x){return String(x||'').toUpperCase().replace(/[^A-Z0-9]/g,'')};
+  if(q.sampleId&&p.sampleId&&norm(q.sampleId)!==norm(p.sampleId)){say('#mdp-frm',file.name+' is for sample '+q.sampleId+', but the report is for '+p.sampleId+'. Not used.',false);return false}
+  for(var k in q)if(!p[k]&&q[k])p[k]=q[k];
+  window.__mdpOpenCase(Object.assign({},cur,{patient:p,form:res.form}));say('#mdp-msg','');
+  say('#mdp-frm',file.name+' ✓ '+res.answered+' answers read'+(res.unmatched&&res.unmatched.length?' ('+res.unmatched.length+' to check on the Check answers tab)':''),true);return true;
+}
+function make(){
+  var c=current(),rows=c&&c.clinical&&c.clinical.rows?c.clinical.rows.length:0;
+  if(!rows)return say('#mdp-msg','Add the white-labelled report first (step 1).',false);
+  if(!answers(c.form))return say('#mdp-msg','Add the counsellor’s filled form first (step 2).',false);
+  if(!c.patient||!c.patient.age)return say('#mdp-msg','The client’s age is missing. Add it on the Check answers tab, or use the form with the patient details filled in.',false);
+  window.__mdpOpenCase(Object.assign({},c,{plan:Object.assign({},c.plan||{},{tier:$('#mdp-tier').value})}));
+  tab('plan');say('#mdp-msg','Action plan created below. Download it as Word or PDF'+(L.sample?', or send it to the LIMS on the LIMS tab.':'.'),true);
 }
 async function planWindow(){
-  bar();
-  tab('lims');var id=await wait(function(){return $('#l-id')},5000);id.value=L.sample;
-  $('#l-find').click();await wait(function(){var f=$('#l-found');return f&&!f.hidden},15000);
-  var c=$('#l-case');if(c&&!c.hidden){c.click();await pause(300);if(c.dataset.armed)c.click();await pause(1500);}else $('#l-use').click();
-  var r=await fetch('/studio/branded/'+encodeURIComponent(L.sample),{credentials:'same-origin'});
-  if(r.ok){await useReport(await r.blob(),decodeURIComponent(r.headers.get('X-File-Name')||'report.pdf'))}
-  else rep(window.__mdpCase&&window.__mdpCase().json.clinical?'not in the LIMS yet; using the results saved at conversion':'not in the LIMS yet. Choose the PDF here.');
+  panel();
+  if(L.sample){
+    tab('lims');var id=await wait(function(){return $('#l-id')},5000);id.value=L.sample;
+    $('#l-find').click();await wait(function(){var f=$('#l-found');return f&&!f.hidden},15000);
+    var c=$('#l-case');if(c&&!c.hidden){c.click();await pause(300);if(c.dataset.armed)c.click();await pause(1500);}else $('#l-use').click();
+    var n=answers((current()||{}).form);if(n)say('#mdp-frm','✓ '+n+' answers from the LIMS. Choose a file to use another copy.',true);
+    var r=await fetch('/studio/branded/'+encodeURIComponent(L.sample),{credentials:'same-origin'});
+    if(r.ok)await useReport(await r.blob(),decodeURIComponent(r.headers.get('X-File-Name')||'report.pdf'));
+    else if((current()||{}).clinical)say('#mdp-rep','✓ Results saved in the LIMS at conversion. Choose a PDF to use another copy.',true);
+  }
   tab('form');
 }
 async function run(){

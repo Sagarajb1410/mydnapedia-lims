@@ -81,6 +81,8 @@ test('Report Centre is installed, renamed and linked to the LIMS', async () => {
     assert.ok(planPage.includes('clinical:(a&&!window.__mdpPlanWin)||!n.some(s=>s.footer)?null:'), 'results are read from a converted report there');
     assert.ok(planPage.includes('window.__mdpOpenCase=e=>jo(e);function jo(e)'));
     assert.ok(!page.includes('window.__mdpPlanWin=true'), 'the full Report Centre is unchanged');
+    const alone = await (await fetch(`${base}/studio?step=plan`, { headers: { cookie } })).text();
+    assert.ok(alone.includes('window.__mdpPlanWin=true') && alone.includes('function panel()'), 'the action plan window also opens without a sample');
     assert.strictEqual((await fetch(`${base}/studio/branded/MDP00020260008`, { headers: { cookie } })).status, 404, 'no white-labelled report yet');
     assert.match((await (await fetch(`${base}/studio/api`, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify({ action: 'ping', key: 'nope' }) })).json()).error, /expired/);
 

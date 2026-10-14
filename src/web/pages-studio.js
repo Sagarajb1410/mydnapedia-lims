@@ -78,6 +78,6 @@ module.exports.head = function head(user, active, sub) {
     .filter(([, , roles]) => roles.includes(user.role));
   return html`<div class="head"><div><h1>${studio.NAME}</h1><p class="sub">${sub}</p></div>
 <div class="actions" style="margin:0">${['admin', 'lab'].includes(user.role) ? html`<a class="btn light" href="/studio?tool=skin" target="_blank" rel="noopener">${icon('reports')}Skin Health</a>` : ''}<a class="btn" href="/studio" target="_blank" rel="noopener">${icon('reports')}Open ${studio.NAME}</a></div></div>
-${['admin', 'counsellor'].includes(user.role) ? html`<form method="get" action="/studio" target="_blank" class="actions noprint" style="margin:0 0 14px"><input type="hidden" name="step" value="plan"><input name="sample" placeholder="Sample ID, e.g. MDP00020260014" required pattern="[A-Za-z0-9-]{4,30}" style="max-width:280px"><button>${icon('plan')}Open action plan</button></form>` : ''}
+${['admin', 'counsellor'].includes(user.role) ? html`<form method="get" action="/studio" target="_blank" class="actions noprint" style="margin:0 0 14px"><input type="hidden" name="step" value="plan"><input name="sample" placeholder="Sample ID (optional)" pattern="[A-Za-z0-9-]{4,30}" style="max-width:240px"><button>${icon('plan')}Action plan window</button><span class="muted">Add the white-labelled report and the counsellor's filled form there; it creates the plan.</span></form>` : ''}
 ${tabs.length > 1 ? html`<nav class="seg">${tabs.map(([href, label]) => html`<a href="${href}" class="${href === active ? 'on' : ''}">${label}</a>`)}</nav>` : ''}`;
 };
