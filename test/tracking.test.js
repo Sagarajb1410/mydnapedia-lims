@@ -4,6 +4,7 @@ const db_ = require('../src/db');
 const seed = require('../src/seed');
 const samples = require('../src/samples');
 const tracking = require('../src/tracking');
+const receipts = require('../src/receipts');
 const { istDate } = require('../src/util');
 
 function fresh() {
@@ -119,4 +120,25 @@ test('the partner lab is never named in code-facing text', () => {
   const dir = path.join(__dirname, '..', 'src');
   const files = fs.readdirSync(dir, { recursive: true }).filter((f) => f.endsWith('.js'));
   for (const f of files) assert.ok(!/\bMMG\b/i.test(fs.readFileSync(path.join(dir, f), 'utf8')), f);
+});
+
+test('receipt acknowledgement lists the day\'s accepted and rejected samples for the partner', () => {
+  const { db, lab, sun, user, reg } = fresh();
+  const a = reg(sun, 'MDPFIT', { collected_now: 'yes', collector: 'Raj' });
+  const b = reg(sun, 'MDPSKIN', { collected_now: 'yes', collector: 'Raj' });
+  tracking.receive(db, lab, a.sample_id, { condition: 'Acceptable' });
+  tracking.receive(db, lab, b.sample_id, { condition: 'Leaked' });
+  const day = istDate();
+  const ack = receipts.forDay(db, sun, sun.account_id, day);
+  assert.match(ack.number, /^ACK-.+-\d{8}$/);
+  const mine = ack.rows.filter((r) => [a.sample_id, b.sample_id].includes(r.sample_id));
+  assert.equal(mine.length, 2);
+  assert.ok(mine.find((r) => r.sample_id === a.sample_id).accepted);
+  assert.match(mine.find((r) => r.sample_id === b.sample_id).reject_reason, /Leaked/);
+  assert.ok(mine.every((r) => r.received_by), 'who received it is shown');
+  assert.ok(receipts.list(db, sun).some((r) => r.day === day && r.account.id === sun.account_id));
+  assert.throws(() => receipts.forDay(db, user('carewell@demo.example'), sun.account_id, day), /not found/);
+  assert.throws(() => receipts.forDay(db, sun, sun.account_id, '1999-01-01'), /Nothing was received/);
+  const mail = db.get("SELECT body FROM notifications WHERE code = 'N8' AND channel = 'email' AND account_id = ? AND body LIKE ?", sun.account_id, `%${a.sample_id}%`);
+  assert.match(mail.body, new RegExp(`/receipts/${sun.account_id}/${day}`));
 });

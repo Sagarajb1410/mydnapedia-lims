@@ -116,6 +116,7 @@ ${field('New password again', 'confirm', '', { type: 'password', required: true 
   require('./pages-bulk')(router, ctxBase, helpers);
   require('./pages-samples')(router, ctxBase, helpers);
   require('./pages-tracking')(router, ctxBase, helpers);
+  require('./pages-receipts')(router, ctxBase, helpers);
   require('./pages-reports')(router, ctxBase, helpers);
   require('./pages-counselling')(router, ctxBase, helpers);
   require('./pages-billing')(router, ctxBase, helpers);

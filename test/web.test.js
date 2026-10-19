@@ -35,9 +35,9 @@ test('main screens render for every role', async () => {
     for (const f of ['logo-sm.png', 'montserrat-400.ttf', 'art.svg']) assert.strictEqual((await fetch(`${base}/static/${f}`)).status, 200, f);
     assert.strictEqual((await fetch(`${base}/static/nope.js`)).status, 404);
     const roles = {
-      'admin@mydnapedia.example': ['/', '/samples', '/samples?phase=lab', '/samples?status=REJECTED', '/samples/new', '/samples/MDP00020260008', '/samples/MDP00020260015', '/tracking', '/tracking/pickups', '/tracking/receive', '/tracking/onward', '/reports', '/counselling', '/counselling/availability', '/plans', '/billing', '/monthly', '/monthly?month=2026-04', '/monthly?month=bad', '/outbox', '/admin', '/admin/tests', '/admin/accounts', '/admin/users', '/audit', '/password'],
-      'lab@demo.example': ['/', '/samples', '/tracking', '/reports'],
-      'sunrise@demo.example': ['/samples', '/samples/new', '/billing'],
+      'admin@mydnapedia.example': ['/', '/samples', '/samples?phase=lab', '/samples?status=REJECTED', '/samples/new', '/samples/MDP00020260008', '/samples/MDP00020260015', '/tracking', '/tracking/pickups', '/tracking/receive', '/receipts', '/tracking/onward', '/reports', '/counselling', '/counselling/availability', '/plans', '/billing', '/monthly', '/monthly?month=2026-04', '/monthly?month=bad', '/outbox', '/admin', '/admin/tests', '/admin/accounts', '/admin/users', '/audit', '/password'],
+      'lab@demo.example': ['/', '/samples', '/tracking', '/receipts', '/reports'],
+      'sunrise@demo.example': ['/samples', '/samples/new', '/receipts', '/billing'],
       'counsellor@demo.example': ['/counselling', '/counselling/availability', '/samples/MDP00020260013', '/plans', '/samples'],
     };
     for (const [email, paths] of Object.entries(roles)) {
@@ -63,5 +63,26 @@ test('main screens render for every role', async () => {
     assert.strictEqual(Buffer.from(await xl.arrayBuffer()).readUInt32LE(0), 0x04034b50);
     const partner = await signIn(base, 'sunrise@demo.example');
     assert.notStrictEqual((await fetch(`${base}/monthly/export`, { headers: { cookie: partner }, redirect: 'manual' })).status, 200);
+  });
+});
+
+test('receipt acknowledgement opens for its partner and staff only', async () => {
+  await withServer(async (base) => {
+    const care = await signIn(base, 'carewell@demo.example');
+    const list = await (await fetch(`${base}/receipts`, { headers: { cookie: care } })).text();
+    const m = list.match(/href="(\/receipts\/\d+\/\d{4}-\d{2}-\d{2})"/);
+    assert.ok(m, 'the demo partner has at least one acknowledgement');
+    const page = await fetch(base + m[1], { headers: { cookie: care } });
+    assert.strictEqual(page.status, 200);
+    const body = await page.text();
+    assert.match(body, /Sample receipt acknowledgement/);
+    assert.match(body, /ACK-/);
+    assert.doesNotMatch(body, /undefined|\[object Object\]/);
+    const lab = await signIn(base, 'lab@demo.example');
+    assert.strictEqual((await fetch(base + m[1], { headers: { cookie: lab } })).status, 200);
+    const other = await signIn(base, 'sunrise@demo.example');
+    assert.notStrictEqual((await fetch(base + m[1], { headers: { cookie: other }, redirect: 'manual' })).status, 200);
+    const counsellor = await signIn(base, 'counsellor@demo.example');
+    assert.notStrictEqual((await fetch(`${base}/receipts`, { headers: { cookie: counsellor }, redirect: 'manual' })).status, 200);
   });
 });

@@ -243,7 +243,7 @@ const NAV = {
     ['Lab', [['/tracking', 'Tracking', 'tracking']]],
     ['Report Centre', [['/reports', 'Reports', 'reports']]],
     ['Messages', [['/outbox', 'Outbox', 'outbox']]]],
-  partner: [['Your work', [['/samples', 'Registration', 'samples'], ['/samples/new', 'New sample', 'register'], ['/billing', 'Billing', 'billing']]]],
+  partner: [['Your work', [['/samples', 'Registration', 'samples'], ['/samples/new', 'New sample', 'register'], ['/receipts', 'Lab receipts', 'check'], ['/billing', 'Billing', 'billing']]]],
   counsellor: [['Report Centre', [['/counselling', 'Counselling', 'counselling'], ['/counselling/availability', 'My availability', 'clock'], ['/plans', 'Action plans', 'plan']]], ['Clients', [['/samples', 'Clients', 'samples']]]],
 };
 

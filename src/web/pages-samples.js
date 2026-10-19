@@ -280,12 +280,24 @@ ${s.status === 'CANCELLED' ? '' : html`<div class="steps" aria-label="Progress">
 <div class="detail"><div>
 ${sampleCard}
 ${isStaff(u) ? trackingCard(s, t) : ''}
+${u.role === 'partner' ? receiptCard(s) : ''}
 ${isStaff(u) ? h.reportCard(u, s, t) : ''}
 ${h.counsellingCard(u, s, t)}
 </div><div>
 ${patientCard}${billingCard}${timelineCard}${cancelCard}
 </div></div>`);
   });
+
+  // The partner's view of the central lab receipt, with its acknowledgement.
+  function receiptCard(s) {
+    if (!s.received_at) return html`<div class="card"><h2 style="margin-top:0">Lab receipt</h2><p class="muted" style="margin:0">Not received at the central lab yet. You will get an acknowledgement when it arrives.</p></div>`;
+    const ok = s.receipt_condition === 'Acceptable';
+    return html`<div class="card"><h2 style="margin-top:0">Lab receipt</h2><dl class="facts">
+<dt>Received</dt><dd>${fmtDateTime(s.received_at)}</dd>
+<dt>Condition</dt><dd>${ok ? html`<span class="pill good">Accepted</span>` : html`<span class="pill bad">Rejected</span> ${s.reject_reason}`}</dd>
+${ok && s.tat_due_at ? html`<dt>Expected report</dt><dd>${fmtDate(s.tat_due_at)}</dd>` : ''}</dl>
+<div class="actions" style="margin-bottom:0"><a class="btn light" href="/receipts/${s.account_id}/${istDate(new Date(s.received_at))}" target="_blank">${icon('print')}Receipt acknowledgement</a></div></div>`;
+  }
 
   // Tracking facts and the next lab action for staff.
   function trackingCard(s, t) {
@@ -296,7 +308,7 @@ ${patientCard}${billingCard}${timelineCard}${cancelCard}
     const today = istDate();
     return html`<div class="card"><h2 style="margin-top:0">Tracking</h2><dl class="facts">
 ${ship.map((x) => html`<dt>${x.leg === 1 ? 'Pickup' : 'Onward dispatch'}</dt><dd><a class="mono" href="/tracking/shipments/${x.id}">${x.shipment_no}</a> · ${x.status.replace('_', ' ')}</dd>`)}
-${s.received_at ? html`<dt>Lab receipt</dt><dd>${fmtDateTime(s.received_at)} · ${s.receipt_condition}</dd>` : ''}
+${s.received_at ? html`<dt>Lab receipt</dt><dd>${fmtDateTime(s.received_at)} · ${s.receipt_condition} · <a href="/receipts/${s.account_id}/${istDate(new Date(s.received_at))}">Acknowledgement</a></dd>` : ''}
 ${s.tat_due_at && s.released_at ? html`<dt>TAT due</dt><dd>${fmtDate(s.tat_due_at)} · <span class="pill ${s.tat_met ? 'good' : 'bad'}">${s.tat_met ? 'report released within TAT' : 'report released late'}</span></dd>` : ''}
 ${s.tat_due_at && !s.released_at ? html`<dt>TAT due</dt><dd>${fmtDate(s.tat_due_at)} · <span class="pill ${tat.paused ? '' : { green: 'good', amber: 'warn', red: 'bad' }[tat.level]}">${tat.paused ? 'paused' : tat.level === 'red' ? 'overdue' : `${tat.daysLeft.toFixed(1)} days left`}</span></dd>` : ''}
 ${s.partner_received_at ? html`<dt>Partner lab receipt</dt><dd>${fmtDate(s.partner_received_at)}${s.partner_lab_ref ? ` · ref ${s.partner_lab_ref}` : ''}</dd>` : ''}
