@@ -234,6 +234,12 @@ ${rows.length ? '' : html`<tr><td colspan="5" class="muted">Nothing here.</td></
       'Content-Disposition': `attachment; filename="${n.attachment_name.replace(/[^A-Za-z0-9._-]/g, '_')}"`, 'X-Content-Type-Options': 'nosniff',
     });
   });
+  // Opens one WhatsApp message (the courier's, from the Samples page) and marks it sent.
+  router.post('/outbox/:id/open', (ctx) => {
+    const url = require('../quick').openMessage(db, ctx.user, ctx.params.id);
+    ctx.res.writeHead(303, { Location: url });
+    ctx.res.end();
+  });
   router.post('/outbox/:id', (ctx) => {
     if (!['admin', 'lab'].includes(ctx.user.role)) throw new UserError('The outbox is for staff.');
     if (ctx.body.do === 'sent') notify.markSent(db, Number(ctx.params.id), ctx.user.id);

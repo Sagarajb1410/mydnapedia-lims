@@ -142,3 +142,26 @@ test('receipt acknowledgement lists the day\'s accepted and rejected samples for
   const mail = db.get("SELECT body FROM notifications WHERE code = 'N8' AND channel = 'email' AND account_id = ? AND body LIKE ?", sun.account_id, `%${a.sample_id}%`);
   assert.match(mail.body, new RegExp(`/receipts/${sun.account_id}/${day}`));
 });
+
+test('one-click steps from the Samples list: collected, courier, reached lab', () => {
+  const quick = require('../src/quick');
+  const { db, admin, lab, sun, reg } = fresh();
+  const a = reg(sun, 'MDPFIT');
+  const b = reg(sun, 'MDPSKIN');
+  const row = (s) => db.get('SELECT s.*, a.type AS account_type FROM samples s JOIN accounts a ON a.id = s.account_id WHERE s.id = ?', s.id);
+  assert.equal(quick.nextStep(sun, row(a)), 'collect');
+  assert.deepEqual(quick.run(db, sun, 'collect', [a.sample_id, b.sample_id]).done.length, 2);
+  assert.equal(quick.nextStep(admin, row(a)), 'courier');
+  assert.equal(quick.nextStep(lab, row(a)), 'receive');
+  assert.throws(() => quick.run(db, lab, 'courier', [a.sample_id]), /admin/);
+  const c = quick.run(db, admin, 'courier', [a.sample_id, b.sample_id]);
+  assert.equal(c.done.length, 2);
+  assert.equal(c.messages.length, 1, 'one courier message for one location');
+  assert.match(quick.openMessage(db, admin, c.messages[0]), /^https:\/\/wa\.me\//);
+  assert.equal(db.get('SELECT status FROM notifications WHERE id = ?', c.messages[0]).status, 'sent');
+  const r = quick.run(db, lab, 'receive', [a.sample_id, b.sample_id, 'NOPE']);
+  assert.equal(r.done.length, 2);
+  assert.equal(r.skipped.length, 1);
+  assert.equal(status(db, a), 'RECEIVED_AT_LAB');
+  assert.ok(['9 am to 12 noon', '12 noon to 3 pm', '3 pm to 6 pm'].includes(quick.nextPickup().window));
+});

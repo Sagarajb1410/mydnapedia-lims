@@ -7,10 +7,13 @@ const barcode = require('../barcode');
 const tracking = require('../tracking');
 const invoice = require('../invoice');
 const track = require('../track');
+const quick = require('../quick');
 const { fmtDateTime, fmtDate, rupees, toPaise, UserError, getSetting, istDate } = require('../util');
 
 const PAY_MODES = ['Cash', 'UPI', 'Card', 'Bank transfer', ['pending', 'Payment pending']];
 const GST_RATES = [['0', '0%'], ['500', '5%'], ['1200', '12%'], ['1800', '18%']];
+const STEP_LABEL = { collect: 'Collected', courier: 'Message courier', receive: 'Reached lab' };
+const STEP_DONE = { collect: 'marked collected', courier: 'booked for courier pickup', receive: 'marked as reached the central lab' };
 const ROUTE_LABEL = { in_house: 'In-house', partner_lab: 'Partner lab' };
 // The end of today in India, so the date picker greys out future days.
 const maxLocal = () => `${istDate()}T23:59`;
@@ -116,6 +119,20 @@ ${pendingRecharges ? html`<div class="flash warn" style="margin:12px 0 0">${icon
       return y == null ? '' : `${y} y`;
     };
     const title = u.role === 'partner' ? 'Your samples' : u.role === 'counsellor' ? 'Clients' : 'Samples';
+    // One-click steps: the next step for each row, and the same for ticked rows.
+    const steps = rows.map((r) => quick.nextStep(u, r));
+    const offered = quick.STEPS.filter((st) => steps.includes(st));
+    const canStep = u.role !== 'counsellor';
+    const msgIds = String(ctx.query.msg || '').split(',').map(Number).filter(Boolean);
+    const pendingMsgs = msgIds.length ? db.all(`SELECT id, body FROM notifications WHERE id IN (${msgIds.map(() => '?').join(',')})`, ...msgIds) : [];
+    const stepCell = (r, st) => {
+      if (st) return html`<div style="display:flex;flex-direction:column;align-items:flex-start;gap:6px"><button class="small" name="one" value="${st}:${r.sample_id}">${STEP_LABEL[st]}</button>
+${st === 'courier' && isStaff(u) ? html`<button class="small light" name="one" value="receive:${r.sample_id}" title="It came to the lab by hand">Reached lab</button>` : ''}</div>`;
+      if (r.received_at && r.account_type !== 'main' && u.role !== 'counsellor') return html`<a class="btn small light" href="/receipts/${r.account_id}/${istDate(new Date(r.received_at))}" target="_blank">${icon('print')}Acknowledgement</a>`;
+      if (['PICKUP_SCHEDULED', 'IN_TRANSIT_TO_LAB'].includes(r.status)) return html`<span class="muted">With the courier</span>`;
+      if (r.status === 'COLLECTED' && u.role === 'partner') return html`<span class="muted">Waiting for courier</span>`;
+      return '';
+    };
     h.send(ctx, title, html`<div class="head"><div><h1>${title}</h1><p class="sub">${q ? html`Results for “${q}” · ` : ''}${rows.length} shown${rows.length === 200 ? ' (latest 200)' : ''}</p></div>
 ${samples.canRegister(u) ? html`<div class="actions" style="margin:0"><a class="btn light" href="/samples/bulk">${icon('upload')}Upload from Excel</a><a class="btn" href="/samples/new">${icon('plus')}Register a sample</a></div>` : ''}</div>
 <div class="chips"><a class="chip ${!phase && !status ? 'on' : ''}" href="${link({})}">All<span>${all}</span></a>
@@ -126,12 +143,30 @@ ${status && !journey.EXCEPTIONS.includes(status) ? html`<a class="chip on" href=
 <input name="q" value="${q}" placeholder="Sample ID, name, mobile or reference" aria-label="Search">
 ${isStaff(u) ? html`<select name="account" aria-label="Registered by"><option value="">All accounts</option>${accounts.map((a) => html`<option value="${a.id}" ${String(a.id) === ctx.query.account ? raw('selected') : ''}>${a.name}</option>`)}</select>` : ''}
 <button class="light">Apply</button>${q || ctx.query.account ? html`<a class="btn light" href="${link({}).replace(/\?.*/, '')}">Clear</a>` : ''}</form>
-<div class="table-wrap"><table class="stack"><thead><tr><th>Sample ID</th><th>${u.role === 'counsellor' ? 'Client' : 'Patient'}</th><th>Test</th>${isStaff(u) ? html`<th>Registered by</th>` : ''}<th>Status</th><th>Registered</th>${u.role === 'counsellor' ? '' : html`<th class="num">Billed</th>`}</tr></thead><tbody>
-${rows.map((r) => html`<tr data-href="/samples/${r.sample_id}"><td><a class="mono" href="/samples/${r.sample_id}">${r.sample_id}</a></td>
+${pendingMsgs.length ? html`<div class="flash ok">${icon('check')}<div>Pickup booked. Send the courier ${pendingMsgs.length === 1 ? 'its message' : `their ${pendingMsgs.length} messages (one per location)`} on WhatsApp:
+${pendingMsgs.map((m) => html`<form method="post" action="/outbox/${m.id}/open" target="_blank" style="display:inline"><button class="small">${icon('outbox')}Send WhatsApp to courier</button></form> `)}</div></div>` : ''}
+${canStep ? raw('<form method="post" action="/samples/quick" id="quick">') : ''}${canStep ? html`<input type="hidden" name="back" value="${link({ ...(phase && !status ? { phase: phase.key } : {}), ...(status ? { status } : {}) })}">` : ''}
+${canStep && offered.length ? html`<div class="card noprint" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:10px 14px"><span class="muted">Tick samples, then:</span>
+${offered.map((st) => html`<button class="small light" name="do" value="${st}">${STEP_LABEL[st]}</button>`)}<span class="muted" style="font-size:12px">Or use the button on each row.</span></div>` : ''}
+<div class="table-wrap"><table class="stack"><thead><tr>${canStep && offered.length ? html`<th style="width:28px"><input type="checkbox" aria-label="Tick all" onclick="document.querySelectorAll('input[name=\'samples[]\']').forEach(function(c){c.checked=this.checked}.bind(this))"></th>` : ''}<th>Sample ID</th><th>${u.role === 'counsellor' ? 'Client' : 'Patient'}</th><th>Test</th>${isStaff(u) ? html`<th>Registered by</th>` : ''}<th>Status</th>${canStep ? html`<th>Next step</th>` : html`<th>Registered</th>`}${u.role === 'counsellor' ? '' : html`<th class="num">Billed</th>`}</tr></thead><tbody>
+${rows.map((r, i) => html`<tr data-href="/samples/${r.sample_id}">${canStep && offered.length ? html`<td>${steps[i] ? html`<input type="checkbox" name="samples[]" value="${r.sample_id}" aria-label="Tick ${r.sample_id}">` : ''}</td>` : ''}<td><a class="mono" href="/samples/${r.sample_id}">${r.sample_id}</a>${canStep ? html`<br><span class="muted">${fmtDate(r.registered_at)}</span>` : ''}</td>
 <td><b>${r.full_name}</b><br><span class="muted">${[r.gender, age(r), r.city].filter(Boolean).join(' · ')}</span></td><td>${r.test_name}</td>
-${isStaff(u) ? html`<td>${r.account_name}${r.partner_ref ? html`<br><span class="muted">Ref ${r.partner_ref}</span>` : ''}</td>` : ''}<td>${statusPill(r.status, samples.STATUSES[r.status])}</td><td class="nw">${fmtDate(r.registered_at)}<br><span class="muted">${r.mobile}</span></td>
+${isStaff(u) ? html`<td>${r.account_name}${r.partner_ref ? html`<br><span class="muted">Ref ${r.partner_ref}</span>` : ''}</td>` : ''}<td>${statusPill(r.status, samples.STATUSES[r.status])}</td>${canStep ? html`<td class="nw">${stepCell(r, steps[i])}</td>` : html`<td class="nw">${fmtDate(r.registered_at)}<br><span class="muted">${r.mobile}</span></td>`}
 ${u.role === 'counsellor' ? '' : html`<td class="num">${r.net_paise == null ? '' : rupees(r.net_paise)}${r.bill_status === 'reversed' ? html`<br><span class="pill">reversed</span>` : ''}</td>`}</tr>`)}
-${rows.length ? '' : html`<tr><td colspan="7"><div class="empty">${icon('search')}No samples match.${samples.canRegister(u) && !q ? html` <a href="/samples/new">Register the first one</a>.` : ''}</div></td></tr>`}</tbody></table></div>`);
+${rows.length ? '' : html`<tr><td colspan="9"><div class="empty">${icon('search')}No samples match.${samples.canRegister(u) && !q ? html` <a href="/samples/new">Register the first one</a>.` : ''}</div></td></tr>`}</tbody></table></div>${canStep ? raw('</form>') : ''}`);
+  });
+
+  router.post('/samples/quick', (ctx) => {
+    const b = ctx.body;
+    const [step, one] = b.one ? String(b.one).split(':') : [b.do, null];
+    const back = /^\/samples(\?|$)/.test(b.back || '') ? b.back : '/samples';
+    const r = quick.run(db, ctx.user, step, one || b.samples);
+    const parts = [];
+    if (r.done.length) parts.push(`${r.done.length === 1 ? r.done[0] : `${r.done.length} samples`} ${STEP_DONE[step]}.`);
+    if (step === 'receive' && r.done.length) parts.push('The TAT clock has started and the partner has been sent the receipt acknowledgement link.');
+    for (const s of r.skipped) parts.push(`${s.id}: ${s.why}`);
+    const to = r.messages.length ? `${back}${back.includes('?') ? '&' : '?'}msg=${r.messages.join(',')}` : back;
+    h.redirect(ctx, to, { type: r.skipped.length ? (r.done.length ? 'warn' : 'error') : 'ok', text: parts.join(' ') || 'Nothing to do.' });
   });
 
   // Patient fields shared by registration and editing. Only name, gender and
