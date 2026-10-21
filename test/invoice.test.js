@@ -46,7 +46,7 @@ test('bills print as Tally-style tax invoices', async () => {
     const base = `http://127.0.0.1:${server.address().port}`;
     const res = await fetch(`${base}/login`, { method: 'POST', redirect: 'manual', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'email=admin@mydnapedia.example&password=test1234' });
     const cookie = res.headers.get('set-cookie').split(';')[0];
-    for (const id of ['MDP26-000001', 'MDP26-000009', 'MDP26-000011', 'MDP26-000012']) {
+    for (const id of ['MDP00020260001', 'MDP00020260009', 'MDP00020260011', 'MDP00020260012']) {
       const page = await fetch(`${base}/samples/${id}/bill`, { headers: { cookie } });
       assert.strictEqual(page.status, 200, id);
       const body = await page.text();

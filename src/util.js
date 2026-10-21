@@ -63,6 +63,8 @@ const SETTING_DEFAULTS = {
   supportEmail: 'support@mydnapedia.example',
   supportPhone: '+91 00000 00000',
   sampleIdPrefix: 'MDP',
+  // {PREFIX}000{YYYY}{N4} gives MDP00020260001. See samples.formatSampleId.
+  sampleIdFormat: '{PREFIX}000{YYYY}{N4}',
   companyGstin: '',
   companyAddress: '',
   companyLegalName: 'TVASTI Health and Wellness Private Limited',
