@@ -184,3 +184,31 @@ test('an old sample is registered, collected and received with its past dates an
   assert.equal(db.get("SELECT count(*) n FROM notifications WHERE sample_pk = ? AND status = 'pending'", s.id).n, 0);
   assert.equal(istDate(new Date(db.get('SELECT created_at FROM bills WHERE sample_pk = ?', s.id).created_at)), '2026-03-01');
 });
+
+test('next step follows the sample all the way and the lab steps work in one click', () => {
+  const quick = require('../src/quick');
+  const { db, admin, lab, sun, reg, user } = fresh();
+  const counsellor = user('counsellor@demo.example');
+  const s = reg(sun, 'MDPFIT', { collected_now: 'yes', collector: 'Raj' });
+  quick.run(db, lab, 'receive', [s.sample_id]);
+  const row = () => db.get('SELECT s.*, t.route, a.type AS account_type FROM samples s JOIN tests t ON t.id = s.test_id JOIN accounts a ON a.id = s.account_id WHERE s.id = ?', s.id);
+  assert.equal(quick.nextStep(lab, row()), 'onward');
+  const o = quick.run(db, lab, 'onward', [s.sample_id]);
+  assert.equal(o.done.length, 1);
+  assert.equal(o.messages.length, 1);
+  assert.equal(quick.nextStep(lab, row()), 'partner_received');
+  quick.run(db, lab, 'partner_received', [s.sample_id]);
+  assert.equal(status(db, s), 'RECEIVED_AT_PARTNER');
+  assert.equal(quick.nextStep(lab, row()), 'upload_result');
+  assert.match(quick.stepHref('upload_result', s.sample_id), /#report$/);
+  const map = (st) => quick.nextStep(admin, { status: st, route: 'partner_lab', account_type: 'partner' });
+  assert.deepEqual(['PARTNER_REPORT_RECEIVED', 'REPORT_WHITE_LABELLED', 'REPORT_APPROVED', 'REPORT_RELEASED', 'COUNSELLING_SCHEDULED', 'COUNSELLING_DONE', 'ACTION_PLAN_DRAFTED', 'ACTION_PLAN_APPROVED'].map(map),
+    ['white_label', 'approve', 'release', 'book', 'session', 'plan', 'approve_plan', 'deliver']);
+  assert.equal(quick.nextStep(counsellor, { status: 'REPORT_RELEASED' }), 'book');
+  assert.equal(quick.nextStep(lab, { status: 'REPORT_RELEASED' }), null);
+  assert.equal(quick.nextStep(sun, { status: 'RECEIVED_AT_LAB' }), null);
+  const ih = reg(lab, 'DEMOIH', { direct: { paymentMode: 'Cash' }, collected_now: 'yes', collector: 'Lab' });
+  quick.run(db, lab, 'receive', [ih.sample_id]);
+  assert.equal(quick.run(db, lab, 'in_house', [ih.sample_id]).done.length, 1);
+  assert.equal(status(db, ih), 'IN_HOUSE_PROCESSING');
+});

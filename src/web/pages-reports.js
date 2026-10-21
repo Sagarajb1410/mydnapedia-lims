@@ -36,7 +36,7 @@ module.exports = function (router, { db, storage }, h) {
     const approved = branded.find((r) => r.status === 'approved');
     if (!list.length && !canSource && !['IN_TRANSIT_TO_PARTNER', 'DISPATCH_TO_PARTNER_SCHEDULED'].includes(s.status)) return '';
     const sourceLabel = t.route === 'in_house' ? 'In-house result' : 'Partner lab report';
-    return html`<div class="card"><h2 style="margin-top:0">Report</h2>
+    return html`<div class="card" id="report"><h2 style="margin-top:0">Report</h2>
 ${s.status === 'IN_TRANSIT_TO_PARTNER' || s.status === 'DISPATCH_TO_PARTNER_SCHEDULED' ? html`<p class="muted">Mark the sample as received at the partner lab before adding its report.</p>` : ''}
 ${list.length ? html`<div class="table-wrap"><table><tr><th>File</th><th>Uploaded</th><th>Status</th></tr>
 ${list.map((r) => html`<tr><td><a href="/reports/${r.id}/file" target="_blank">${r.kind === 'source' ? sourceLabel : 'White-labelled report'} v${r.version}</a>${r.pages ? html`<br><span class="muted">${r.pages} pages</span>` : ''}</td>

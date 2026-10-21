@@ -55,20 +55,19 @@ ${user.role === 'admin' ? select('Counsellor', 'counsellor', cs.map((c) => [c.id
 ${field('Meeting link', 'link', '', { opt: true, attrs: 'placeholder="https://meet.google.com/…"' })}</div>
 <div class="actions"><button>Book this slot and message the client</button></div></form>
 <p class="muted" style="margin:10px 0 0">Or book any other time:</p>` : html`<p class="muted" style="margin:12px 0 0">No open slots. <a href="/counselling/availability">Add availability</a> so clients can choose a time themselves, or book a time below.</p>`;
-    return html`<div class="card"><h2 style="margin-top:0">Counselling</h2><dl class="facts">
+    return html`<div class="card" id="counselling"><h2 style="margin-top:0">Counselling</h2><dl class="facts">
 <dt>Report</dt><dd>${released ? html`<a href="/reports/${released.id}/file" target="_blank">Open the released report</a>` : '—'}${source && mayAct ? html` · <a href="/reports/${source.id}/file" target="_blank">partner's original</a>` : ''}</dd>
 ${session ? html`<dt>Session</dt><dd>${fmtDateTime(session.scheduled_at)} · ${session.mode} with ${session.counsellor_name}<br><span class="pill ${session.status === 'done' ? 'good' : session.status === 'no_show' ? 'bad' : ''}">${{ scheduled: 'Booked', done: 'Held', no_show: 'Did not attend', cancelled: 'Cancelled' }[session.status]}</span>${session.meeting_link ? html` <a href="${session.meeting_link}" target="_blank" rel="noopener">Meeting link</a>` : ''}</dd>` : ''}
 <dt>Counselling form</dt><dd>${f ? html`<span class="pill ${f.status === 'complete' ? 'good' : 'warn'}">${f.status === 'complete' ? 'Complete' : 'Draft'}</span> · updated ${fmtDateTime(f.updated_at)}` : 'Not started'}</dd></dl>
 ${!mayAct ? html`<p class="muted">This client is booked with another counsellor.</p>` : ''}
-${mayAct && ['REPORT_RELEASED', 'COUNSELLING_SCHEDULED'].includes(s.status) ? html`${slotForm}${bookForm}` : ''}
+${mayAct && s.status === 'REPORT_RELEASED' ? html`${slotForm}${bookForm}` : ''}
+${mayAct && s.status === 'COUNSELLING_SCHEDULED' ? html`<details class="noprint" style="margin-top:10px"><summary style="cursor:pointer;font-weight:600">Change the booking</summary>${slotForm}${bookForm}</details>` : ''}
 ${mayAct && s.status === 'COUNSELLING_SCHEDULED' ? html`<form method="post" action="/samples/${s.sample_id}/counselling/outcome" class="noprint" style="margin-top:12px;border-top:1px solid var(--line);padding-top:12px">
 <b>After the session</b><div style="margin-top:6px">${field('Note', 'note', '', { opt: true })}</div>
 <div class="actions"><button name="outcome" value="done">Session held</button><button class="light" name="outcome" value="no_show">Client did not attend</button></div></form>` : ''}
 ${mayAct && PLAN_OPEN.includes(s.status) && !counselling.FORM_OPEN.includes(s.status) ? html`<div class="actions noprint">${h.studioButton('Open action plan', s.sample_id, 'plan', '')}</div>` : ''}
-${mayAct && counselling.FORM_OPEN.includes(s.status) ? html`<div class="actions noprint">${h.studioButton('Open action plan', s.sample_id, 'plan', '')}${h.studioButton('Counselling form in Report Centre', s.sample_id, 'form', f && f.status === 'complete' ? 'light' : '')}
-
-<a class="btn light" href="/samples/${s.sample_id}/counselling/form">${f ? 'Form on this screen' : 'Fill the form on this screen'}</a></div>
-<p class="muted" style="margin:6px 0 0">Report Centre opens with this client's details, saved form and the partner's results loaded. On its LIMS tab, send the counselling form, case file and action plan back here. A case sent from Report Centre also fills in the form on this screen.</p>` : ''}
+${mayAct && counselling.FORM_OPEN.includes(s.status) ? html`<div class="actions noprint"><a class="btn ${f && f.status === 'complete' ? 'light' : ''}" href="/samples/${s.sample_id}/counselling/form">${f ? 'Open the counselling form' : 'Fill the counselling form'}</a>${h.studioButton('Make the action plan', s.sample_id, 'plan', f && f.status === 'complete' ? '' : 'light')}</div>
+<p class="muted" style="margin:6px 0 0">Fill the form here during or after the session, then make the action plan: its window opens with the white-labelled report and this form already loaded. You can also <a href="/studio?sample=${s.sample_id}&step=form" target="_blank" rel="noopener">fill the form in Report Centre</a>.</p>` : ''}
 ${plans.length ? html`<h3 style="margin:16px 0 6px;font-size:15px">Action plan</h3><div class="table-wrap"><table><tr><th>File</th><th>Uploaded</th><th>Status</th></tr>
 ${plans.map((r) => html`<tr><td><a href="/plans/${r.id}/file">Action plan v${r.version}</a> <span class="muted">(${r.file_type === 'docx' ? 'Word' : 'PDF'})</span></td><td>${fmtDateTime(r.uploaded_at)}<br><span class="muted">${r.uploaded_by_name || ''}</span></td>
 <td><span class="pill ${PLAN_TONE[r.status] || ''}">${PLAN_STATUS[r.status]}</span>${r.review_note ? html`<br><span class="muted">${r.reviewed_by_name}: ${r.review_note}</span>` : ''}</td></tr>`)}</table></div>

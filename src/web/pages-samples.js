@@ -13,8 +13,10 @@ const { fmtDateTime, fmtDate, rupees, toPaise, UserError, getSetting, istDate } 
 
 const PAY_MODES = ['Cash', 'UPI', 'Card', 'Bank transfer', ['pending', 'Payment pending']];
 const GST_RATES = [['0', '0%'], ['500', '5%'], ['1200', '12%'], ['1800', '18%']];
-const STEP_LABEL = { collect: 'Collected', courier: 'Message courier', receive: 'Reached lab' };
-const STEP_DONE = { collect: 'marked collected', courier: 'booked for courier pickup', receive: 'marked as reached the central lab' };
+const STEP_DONE = {
+  collect: 'marked collected', courier: 'booked for courier pickup', receive: 'marked as reached the central lab',
+  onward: 'booked to go to the partner lab', partner_received: 'marked as received at the partner lab', in_house: 'started in-house testing',
+};
 const ROUTE_LABEL = { in_house: 'In-house', partner_lab: 'Partner lab' };
 // The end of today in India, so the date picker greys out future days.
 const maxLocal = () => `${istDate()}T23:59`;
@@ -32,6 +34,14 @@ module.exports = function (router, { db }, h) {
     const counts = Object.fromEntries(db.all('SELECT status, COUNT(*) c FROM samples GROUP BY status').map((r) => [r.status, r.c]));
     const n = (st) => st.reduce((t, k) => t + (counts[k] || 0), 0);
     const active = n(Object.keys(samples.STATUSES).filter((k) => !['DELIVERED', 'CLOSED', 'CANCELLED'].includes(k)));
+    // How many samples wait on each next step for this user, in journey order.
+    const tally = new Map();
+    for (const r of db.all(`SELECT s.status, t.route, a.type AS account_type FROM samples s JOIN tests t ON t.id = s.test_id JOIN accounts a ON a.id = s.account_id
+        WHERE s.status NOT IN ('DELIVERED', 'CLOSED', 'CANCELLED')`)) {
+      const st = quick.nextStep(u, r);
+      if (st) tally.set(st, (tally.get(st) || 0) + 1);
+    }
+    const waiting = Object.keys(quick.STEP_INFO).filter((st) => tally.has(st)).map((st) => [st, tally.get(st)]);
     const lastDay = db.get('SELECT COUNT(*) c FROM samples WHERE registered_at >= ?', new Date(Date.now() - 86400000).toISOString()).c;
     const pendingOutbox = db.get("SELECT COUNT(*) c FROM notifications WHERE status = 'pending'").c;
     const board = tracking.tatBoard(db);
@@ -76,9 +86,8 @@ ${watch.length ? html`<ul class="list">${watch.map((r) => {
 ${u.role === 'admin' ? html`<div class="card"><div class="head" style="margin-bottom:6px"><h2 style="margin:0">Partner credit</h2><a href="/billing" style="font-size:13px;font-weight:600">Billing</a></div>
 ${low.length ? html`<ul class="list">${low.map((a) => html`<li><div class="grow"><b><a href="/billing/ledger/${a.id}">${a.name}</a></b><span>Reminder level ${rupees(a.low_balance_paise)}</span></div><b class="num ${a.bal < 0 ? 'neg' : ''}">${rupees(a.bal)}</b></li>`)}</ul>` : html`<div class="empty">${icon('check')}Every partner has enough credit.</div>`}
 ${pendingRecharges ? html`<div class="flash warn" style="margin:12px 0 0">${icon('info')}<div><a href="/billing">${pendingRecharges} recharge request${pendingRecharges === 1 ? '' : 's'}</a> waiting for your review.</div></div>` : ''}</div>` : ''}
-<div class="card"><h2>Quick actions</h2><div class="actions" style="margin:0;display:grid;grid-template-columns:1fr 1fr;gap:10px">
-<a class="btn light" href="/tracking/pickups">${icon('tracking')}Pickups</a><a class="btn light" href="/tracking/receive">${icon('samples')}Lab receipt</a>
-<a class="btn light" href="/tracking/onward">${icon('arrow')}Partner dispatch</a><a class="btn light" href="/reports">${icon('reports')}Reports</a></div></div>
+<div class="card"><h2>Waiting for you</h2>${waiting.length ? html`<ul class="list">${waiting.map(([st, n]) => html`<li><div class="grow"><b>${quick.STEP_INFO[st].label}</b><span>${quick.STEP_INFO[st].hint}</span></div><b class="num">${n}</b></li>`)}</ul>
+<div class="actions" style="margin:12px 0 0"><a class="btn" href="/samples?todo=1">Do them on the Samples page</a></div>` : html`<div class="empty">${icon('check')}Nothing is waiting for you.</div>`}</div>
 </div></div>`);
   });
 
@@ -99,8 +108,8 @@ ${pendingRecharges ? html`<div class="flash warn" style="margin:12px 0 0">${icon
     const status = samples.STATUSES[ctx.query.status] ? ctx.query.status : '';
     if (status) { where.push('s.status = ?'); params.push(status); } else if (phase) { where.push(`s.status IN (${phase.statuses.map(() => '?').join(',')})`); params.push(...phase.statuses); }
     if (isStaff(u) && ctx.query.account) { where.push('s.account_id = ?'); params.push(Number(ctx.query.account)); }
-    const rows = db.all(
-      `SELECT s.*, p.full_name, p.mobile, p.gender, p.dob, p.age_years, p.created_at AS patient_created_at, p.city, t.name AS test_name, a.name AS account_name, a.type AS account_type, b.net_paise, b.status AS bill_status
+    let rows = db.all(
+      `SELECT s.*, p.full_name, p.mobile, p.gender, p.dob, p.age_years, p.created_at AS patient_created_at, p.city, t.name AS test_name, t.route AS test_route, a.name AS account_name, a.type AS account_type, b.net_paise, b.status AS bill_status
          FROM samples s JOIN patients p ON p.id = s.patient_id JOIN tests t ON t.id = s.test_id
          JOIN accounts a ON a.id = s.account_id LEFT JOIN bills b ON b.sample_pk = s.id
         WHERE ${where.join(' AND ')} ORDER BY s.id DESC LIMIT 200`, ...params);
@@ -120,14 +129,17 @@ ${pendingRecharges ? html`<div class="flash warn" style="margin:12px 0 0">${icon
       return y == null ? '' : `${y} y`;
     };
     const title = u.role === 'partner' ? 'Your samples' : u.role === 'counsellor' ? 'Clients' : 'Samples';
-    // One-click steps: the next step for each row, and the same for ticked rows.
+    // Next step for each row: one click here, or a button that opens where it
+    // is done. "Waiting for me" keeps only the rows with a step for this user.
+    const todoCount = rows.filter((r) => quick.nextStep(u, r)).length;
+    const todo = ctx.query.todo === '1';
+    if (todo) rows = rows.filter((r) => quick.nextStep(u, r));
     const steps = rows.map((r) => quick.nextStep(u, r));
     const offered = quick.STEPS.filter((st) => steps.includes(st));
-    const canStep = u.role !== 'counsellor';
-    const msgIds = String(ctx.query.msg || '').split(',').map(Number).filter(Boolean);
-    const pendingMsgs = msgIds.length ? db.all(`SELECT id, body FROM notifications WHERE id IN (${msgIds.map(() => '?').join(',')})`, ...msgIds) : [];
+    const canStep = true;
     const stepCell = (r, st) => {
-      if (st) return html`<div style="display:flex;flex-direction:column;align-items:flex-start;gap:6px"><button class="small" name="one" value="${st}:${r.sample_id}">${STEP_LABEL[st]}</button>
+      if (st && !quick.STEPS.includes(st)) return html`<a class="btn small" href="${quick.stepHref(st, r.sample_id)}" title="${quick.STEP_INFO[st].hint}">${quick.STEP_INFO[st].label}</a>`;
+      if (st) return html`<div style="display:flex;flex-direction:column;align-items:flex-start;gap:6px"><button class="small" name="one" value="${st}:${r.sample_id}" title="${quick.STEP_INFO[st].hint}">${quick.STEP_INFO[st].label}</button>
 ${st === 'courier' && isStaff(u) ? html`<button class="small light" name="one" value="receive:${r.sample_id}" title="It came to the lab by hand">Reached lab</button>` : ''}</div>`;
       if (r.received_at && r.account_type !== 'main' && u.role !== 'counsellor') return html`<a class="btn small light" href="/receipts/${r.account_id}/${istDate(new Date(r.received_at))}" target="_blank">${icon('print')}Acknowledgement</a>`;
       if (['PICKUP_SCHEDULED', 'IN_TRANSIT_TO_LAB'].includes(r.status)) return html`<span class="muted">With the courier</span>`;
@@ -136,7 +148,7 @@ ${st === 'courier' && isStaff(u) ? html`<button class="small light" name="one" v
     };
     h.send(ctx, title, html`<div class="head"><div><h1>${title}</h1><p class="sub">${q ? html`Results for “${q}” · ` : ''}${rows.length} shown${rows.length === 200 ? ' (latest 200)' : ''}</p></div>
 ${samples.canRegister(u) ? html`<div class="actions" style="margin:0"><a class="btn light" href="/samples/bulk">${icon('upload')}Upload from Excel</a><a class="btn" href="/samples/new">${icon('plus')}Register a sample</a></div>` : ''}</div>
-<div class="chips"><a class="chip ${!phase && !status ? 'on' : ''}" href="${link({})}">All<span>${all}</span></a>
+<div class="chips"><a class="chip ${todo ? 'on' : ''}" href="${link({ todo: '1' })}">Waiting for me<span>${todoCount}</span></a><a class="chip ${!phase && !status && !todo ? 'on' : ''}" href="${link({})}">All<span>${all}</span></a>
 ${journey.PHASES.filter((p) => cnt(p.statuses) || phase === p).map((p) => html`<a class="chip ${phase === p && !status ? 'on' : ''}" href="${link({ phase: p.key })}">${p.label}<span>${cnt(p.statuses)}</span></a>`)}
 ${journey.EXCEPTIONS.filter((k) => byStatus[k] || status === k).map((k) => html`<a class="chip ${status === k ? 'on' : ''}" href="${link({ status: k })}">${samples.STATUSES[k]}<span>${byStatus[k] || 0}</span></a>`)}
 ${status && !journey.EXCEPTIONS.includes(status) ? html`<a class="chip on" href="${link({ status })}">${samples.STATUSES[status]}<span>${byStatus[status] || 0}</span></a>` : ''}</div>
@@ -144,13 +156,12 @@ ${status && !journey.EXCEPTIONS.includes(status) ? html`<a class="chip on" href=
 <input name="q" value="${q}" placeholder="Sample ID, name, mobile or reference" aria-label="Search">
 ${isStaff(u) ? html`<select name="account" aria-label="Registered by"><option value="">All accounts</option>${accounts.map((a) => html`<option value="${a.id}" ${String(a.id) === ctx.query.account ? raw('selected') : ''}>${a.name}</option>`)}</select>` : ''}
 <button class="light">Apply</button>${q || ctx.query.account ? html`<a class="btn light" href="${link({}).replace(/\?.*/, '')}">Clear</a>` : ''}</form>
-${pendingMsgs.length ? html`<div class="flash ok">${icon('check')}<div>Pickup booked. Send the courier ${pendingMsgs.length === 1 ? 'its message' : `their ${pendingMsgs.length} messages (one per location)`} on WhatsApp:
-${pendingMsgs.map((m) => html`<form method="post" action="/outbox/${m.id}/open" target="_blank" style="display:inline"><button class="small">${icon('outbox')}Send WhatsApp to courier</button></form> `)}</div></div>` : ''}
-${canStep ? raw('<form method="post" action="/samples/quick" id="quick">') : ''}${canStep ? html`<input type="hidden" name="back" value="${link({ ...(phase && !status ? { phase: phase.key } : {}), ...(status ? { status } : {}) })}">` : ''}
+${courierBanner(ctx)}
+${canStep ? raw('<form method="post" action="/samples/quick" id="quick">') : ''}${canStep ? html`<input type="hidden" name="back" value="${link({ ...(phase && !status ? { phase: phase.key } : {}), ...(status ? { status } : {}), ...(todo ? { todo: '1' } : {}) })}">` : ''}
 ${canStep && offered.length ? html`<div class="card noprint" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:10px 14px"><span class="muted">Tick samples, then:</span>
-${offered.map((st) => html`<button class="small light" name="do" value="${st}">${STEP_LABEL[st]}</button>`)}<span class="muted" style="font-size:12px">Or use the button on each row.</span></div>` : ''}
+${offered.map((st) => html`<button class="small light" name="do" value="${st}">${quick.STEP_INFO[st].label}</button>`)}<span class="muted" style="font-size:12px">Or use the button on each row.</span></div>` : ''}
 <div class="table-wrap"><table class="stack"><thead><tr>${canStep && offered.length ? html`<th style="width:28px"><input type="checkbox" aria-label="Tick all" onclick="document.querySelectorAll('input[name=\'samples[]\']').forEach(function(c){c.checked=this.checked}.bind(this))"></th>` : ''}<th>Sample ID</th><th>${u.role === 'counsellor' ? 'Client' : 'Patient'}</th><th>Test</th>${isStaff(u) ? html`<th>Registered by</th>` : ''}<th>Status</th>${canStep ? html`<th>Next step</th>` : html`<th>Registered</th>`}${u.role === 'counsellor' ? '' : html`<th class="num">Billed</th>`}</tr></thead><tbody>
-${rows.map((r, i) => html`<tr data-href="/samples/${r.sample_id}">${canStep && offered.length ? html`<td>${steps[i] ? html`<input type="checkbox" name="samples[]" value="${r.sample_id}" aria-label="Tick ${r.sample_id}">` : ''}</td>` : ''}<td><a class="mono" href="/samples/${r.sample_id}">${r.sample_id}</a>${canStep ? html`<br><span class="muted">${fmtDate(r.registered_at)}</span>` : ''}</td>
+${rows.map((r, i) => html`<tr data-href="/samples/${r.sample_id}">${canStep && offered.length ? html`<td>${quick.STEPS.includes(steps[i]) ? html`<input type="checkbox" name="samples[]" value="${r.sample_id}" aria-label="Tick ${r.sample_id}">` : ''}</td>` : ''}<td><a class="mono" href="/samples/${r.sample_id}">${r.sample_id}</a>${canStep ? html`<br><span class="muted">${fmtDate(r.registered_at)}</span>` : ''}</td>
 <td><b>${r.full_name}</b><br><span class="muted">${[r.gender, age(r), r.city].filter(Boolean).join(' · ')}</span></td><td>${r.test_name}</td>
 ${isStaff(u) ? html`<td>${r.account_name}${r.partner_ref ? html`<br><span class="muted">Ref ${r.partner_ref}</span>` : ''}</td>` : ''}<td>${statusPill(r.status, samples.STATUSES[r.status])}</td>${canStep ? html`<td class="nw">${stepCell(r, steps[i])}</td>` : html`<td class="nw">${fmtDate(r.registered_at)}<br><span class="muted">${r.mobile}</span></td>`}
 ${u.role === 'counsellor' ? '' : html`<td class="num">${r.net_paise == null ? '' : rupees(r.net_paise)}${r.bill_status === 'reversed' ? html`<br><span class="pill">reversed</span>` : ''}</td>`}</tr>`)}
@@ -160,7 +171,7 @@ ${rows.length ? '' : html`<tr><td colspan="9"><div class="empty">${icon('search'
   router.post('/samples/quick', (ctx) => {
     const b = ctx.body;
     const [step, one] = b.one ? String(b.one).split(':') : [b.do, null];
-    const back = /^\/samples(\?|$)/.test(b.back || '') ? b.back : '/samples';
+    const back = /^\/samples(\?|$|\/[A-Za-z0-9-]+$)/.test(b.back || '') ? b.back : '/samples';
     const r = quick.run(db, ctx.user, step, one || b.samples);
     const parts = [];
     if (r.done.length) parts.push(`${r.done.length === 1 ? r.done[0] : `${r.done.length} samples`} ${STEP_DONE[step]}.`);
@@ -328,6 +339,7 @@ ${sbill ? html`<dt>Patient bill</dt><dd>${sbill.bill_no}: ${rupees(sbill.patient
 <div class="actions noprint" style="margin:0"><a class="btn light" href="/samples/${s.sample_id}/label" target="_blank">${icon('print')}Label</a>${u.role === 'counsellor' ? '' : html`<a class="btn light" href="/samples/${s.sample_id}/bill" target="_blank">${icon('print')}Bill</a>`}
 ${samples.canEditPatient(u, s) && s.status !== 'CANCELLED' ? html`<a class="btn light" href="/samples/${s.sample_id}/edit">Edit patient</a>` : ''}</div></div>
 ${s.status === 'CANCELLED' ? '' : html`<div class="steps" aria-label="Progress">${steps.map((st, i) => html`<div class="step ${st.state} ${i === 0 ? 'first' : ''}">${st.label}</div>`)}</div>`}
+${courierBanner(ctx)}${nextCard(u, s, t, a)}
 <div class="detail"><div>
 ${sampleCard}
 ${isStaff(u) ? trackingCard(s, t) : ''}
@@ -338,6 +350,27 @@ ${h.counsellingCard(u, s, t)}
 ${patientCard}${billingCard}${timelineCard}${cancelCard}
 </div></div>`);
   });
+
+  // After a one-click courier booking: the courier's WhatsApp message, ready to open.
+  function courierBanner(ctx) {
+    const ids = String(ctx.query.msg || '').split(',').map(Number).filter(Boolean);
+    const msgs = ids.length ? db.all(`SELECT id FROM notifications WHERE status = 'pending' AND id IN (${ids.map(() => '?').join(',')})`, ...ids) : [];
+    if (!msgs.length) return '';
+    return html`<div class="flash ok">${icon('check')}<div>Courier booked. Send the courier ${msgs.length === 1 ? 'its message' : `their ${msgs.length} messages (one per location)`} on WhatsApp:
+${msgs.map((m) => html`<form method="post" action="/outbox/${m.id}/open" target="_blank" style="display:inline"><button class="small">${icon('outbox')}Send WhatsApp to courier</button></form> `)}</div></div>`;
+  }
+
+  // The one thing to do next for this sample, the same step as on the list.
+  function nextCard(u, s, t, a) {
+    const st = quick.nextStep(u, { ...s, route: t.route, account_type: a.type });
+    if (!st) return '';
+    const info = quick.STEP_INFO[st];
+    const button = quick.STEPS.includes(st)
+      ? html`<form method="post" action="/samples/quick" style="margin:0"><input type="hidden" name="back" value="/samples/${s.sample_id}"><button name="one" value="${st}:${s.sample_id}">${info.label}</button></form>`
+      : html`<a class="btn" href="${quick.stepHref(st, s.sample_id)}">${info.label}</a>`;
+    return html`<div class="card noprint" style="display:flex;gap:14px;align-items:center;justify-content:space-between;flex-wrap:wrap;border-color:var(--accent,#f9b300)">
+<div><b>Next step</b><br><span class="muted">${info.hint}</span></div>${button}</div>`;
+  }
 
   // The partner's view of the central lab receipt, with its acknowledgement.
   function receiptCard(s) {
@@ -369,13 +402,11 @@ ${original ? html`<dt>Recollection of</dt><dd><a class="mono" href="/samples/${o
 ${recollection ? html`<dt>Fresh sample</dt><dd><a class="mono" href="/samples/${recollection.sample_id}">${recollection.sample_id}</a></dd>` : ''}
 ${!ship.length && !s.received_at ? html`<dt>Next step</dt><dd>${['REGISTERED', 'COLLECTED'].includes(s.status) ? 'Waiting for pickup or lab receipt' : '—'}</dd>` : ''}</dl>
 <div class="actions noprint">
-${s.status === 'RECEIVED_AT_LAB' && t.route === 'in_house' ? html`<form method="post" action="/samples/${s.sample_id}/start-in-house"><button>Start in-house processing</button></form>` : ''}
-${s.status === 'RECEIVED_AT_LAB' && t.route === 'partner_lab' ? html`<a class="btn" href="/tracking/onward">Send to partner lab</a>` : ''}
 ${s.status === 'REJECTED' && !recollection ? html`<form method="post" action="/samples/${s.sample_id}/recollect"><button>Register fresh sample (no charge)</button></form>` : ''}
 ${s.status === 'ON_HOLD' ? html`<form method="post" action="/samples/${s.sample_id}/release"><button>Release hold</button></form>` : ''}</div>
-${['IN_TRANSIT_TO_PARTNER', 'DISPATCH_TO_PARTNER_SCHEDULED'].includes(s.status) ? html`<form method="post" action="/samples/${s.sample_id}/partner-received" class="noprint" style="margin-top:12px"><input type="hidden" name="back" value="sample">
-<b>Partner lab received it</b><div class="grid" style="margin-top:8px">${field('Date received', 'received_on', today, { type: 'date', required: true, attrs: `max="${today}"` })}${field('Their reference', 'ref', '', { opt: true })}</div>
-<div class="actions"><button>Mark received at partner lab</button></div></form>` : ''}
+${['IN_TRANSIT_TO_PARTNER', 'DISPATCH_TO_PARTNER_SCHEDULED'].includes(s.status) ? html`<details class="noprint" style="margin-top:12px"><summary>Partner lab received it on another day, or gave a reference</summary><form method="post" action="/samples/${s.sample_id}/partner-received"><input type="hidden" name="back" value="sample">
+<div class="grid" style="margin-top:8px">${field('Date received', 'received_on', today, { type: 'date', required: true, attrs: `max="${today}"` })}${field('Their reference', 'ref', '', { opt: true })}</div>
+<div class="actions"><button class="light">Mark received at partner lab</button></div></form></details>` : ''}
 ${!['ON_HOLD', 'CANCELLED', 'CLOSED', 'DELIVERED', 'REJECTED', 'RECOLLECTION_REQUESTED'].includes(s.status) ? html`<details class="noprint" style="margin-top:12px"><summary>Put on hold</summary>
 <form method="post" action="/samples/${s.sample_id}/hold"><div class="grid">${field('Reason', 'reason', '', { required: true })}</div><div class="actions"><button class="light">Put on hold</button></div></form></details>` : ''}</div>`;
   }
