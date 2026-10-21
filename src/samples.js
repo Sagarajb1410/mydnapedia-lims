@@ -77,6 +77,7 @@ function validatePatient(p) {
     full_name: clean(p.full_name).replace(/\s+/g, ' '),
     gender: clean(p.gender),
     dob: clean(p.dob),
+    age_years: clean(p.age_years ?? p.age),
     mobile: clean(p.mobile).replace(/\D/g, '').replace(/^91(?=\d{10}$)/, ''),
     email: clean(p.email).toLowerCase(),
     address: clean(p.address),
@@ -86,18 +87,37 @@ function validatePatient(p) {
   };
   if (out.full_name.length < 2) throw new UserError("Enter the patient's full name.");
   if (!GENDERS.includes(out.gender)) throw new UserError('Choose the gender.');
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(out.dob)) throw new UserError('Enter the date of birth.');
-  const today = istDate();
-  if (out.dob >= today) throw new UserError('The date of birth is today or in the future. Please check it.');
-  const oneYearAgo = String(Number(today.slice(0, 4)) - 1) + today.slice(4);
-  if (out.dob > oneYearAgo) throw new UserError('The patient must be at least 1 year old. Please check the date of birth.');
-  if (out.dob < '1900-01-01') throw new UserError('Please check the date of birth.');
-  if (!/^[6-9]\d{9}$/.test(out.mobile)) throw new UserError('Enter a 10-digit Indian mobile number.');
+  // Only name, gender and age are compulsory. The date of birth is optional;
+  // when given, the age is worked out from it.
+  if (out.dob) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(out.dob)) throw new UserError('Please check the date of birth.');
+    const today = istDate();
+    if (out.dob >= today) throw new UserError('The date of birth is today or in the future. Please check it.');
+    if (out.dob < '1900-01-01') throw new UserError('Please check the date of birth.');
+    out.age_years = ageFromDob(out.dob);
+  } else {
+    if (!/^\d{1,3}$/.test(out.age_years) || Number(out.age_years) > 120) throw new UserError("Enter the patient's age in years.");
+    out.age_years = Number(out.age_years);
+  }
+  if (out.mobile && !/^[6-9]\d{9}$/.test(out.mobile)) throw new UserError('The mobile number should be 10 digits. Leave it empty if you do not have it.');
   if (out.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(out.email)) throw new UserError('The email address does not look right.');
-  if (!out.city) throw new UserError('Enter the city.');
-  if (!STATES.includes(out.state)) throw new UserError('Choose the state.');
-  if (!/^[1-9]\d{5}$/.test(out.pincode)) throw new UserError('Enter a 6-digit pincode.');
+  if (out.state && !STATES.includes(out.state)) throw new UserError('Choose the state from the list.');
+  if (out.pincode && !/^[1-9]\d{5}$/.test(out.pincode)) throw new UserError('The pincode should be 6 digits. Leave it empty if you do not have it.');
   return out;
+}
+
+function ageFromDob(dob, on = istDate()) {
+  const [y, m, d] = dob.split('-').map(Number);
+  const [ty, tm, td] = on.split('-').map(Number);
+  return ty - y - ((tm < m || (tm === m && td < d)) ? 1 : 0);
+}
+
+// The patient's age today: from the date of birth when there is one,
+// otherwise the age given at registration plus the years since.
+function patientAge(p) {
+  if (p.dob) return ageFromDob(p.dob);
+  if (p.age_years == null || p.age_years === '') return null;
+  return Number(p.age_years) + (p.created_at ? ageFromDob(istDate(new Date(p.created_at))) : 0);
 }
 
 // Sample IDs follow the admin's format: {PREFIX} the prefix, {YYYY} or {YY}
@@ -148,15 +168,17 @@ function addEvent(db, samplePk, from, to, userId, note) {
     samplePk, from, to, nowIso(), userId, note || null);
 }
 
-// Same mobile, date of birth and test in the last 90 days.
+// Same mobile, date of birth (or name, when there is no date of birth) and
+// test in the last 90 days. Without a mobile there is nothing to match on.
 function findDuplicate(db, user, patient, testId) {
+  if (!patient.mobile) return null;
   const since = new Date(Date.now() - 90 * 86400000).toISOString();
   const sc = scope(user);
   return db.get(
     `SELECT s.sample_id, s.registered_at FROM samples s JOIN patients p ON p.id = s.patient_id
-      WHERE p.mobile = ? AND p.dob = ? AND s.test_id = ? AND s.registered_at >= ? AND s.status != 'CANCELLED' AND ${sc.sql}
+      WHERE p.mobile = ? AND p.dob = ? AND (p.dob != '' OR lower(p.full_name) = lower(?)) AND s.test_id = ? AND s.registered_at >= ? AND s.status != 'CANCELLED' AND ${sc.sql}
       ORDER BY s.id DESC LIMIT 1`,
-    patient.mobile, patient.dob, testId, since, ...sc.params,
+    patient.mobile, patient.dob, patient.full_name, testId, since, ...sc.params,
   );
 }
 
@@ -169,35 +191,32 @@ function register(db, user, input) {
   const patient = validatePatient(input);
   const test = db.get('SELECT * FROM tests WHERE id = ? AND active = 1', Number(input.test_id));
   if (!test) throw new UserError('Choose a test.');
-  if (input.consent_testing !== 'yes') throw new UserError('The patient must consent to the test before it can be registered.');
-  const consentMethod = clean(input.consent_method);
-  if (!['Signed form', 'Confirmed verbally by patient'].includes(consentMethod)) throw new UserError('Choose how consent was taken.');
+  const consentMethod = ['Signed form', 'Confirmed verbally by patient'].includes(clean(input.consent_method)) ? clean(input.consent_method) : null;
 
   const duplicate = findDuplicate(db, user, patient, test.id);
   const dupReason = clean(input.duplicate_reason);
   if (duplicate && !dupReason) return { duplicate };
 
   const collectedNow = input.collected_now === 'yes';
-  const collector = clean(input.collector);
-  if (collectedNow && !collector) throw new UserError('Enter who collected the sample.');
+  const collector = clean(input.collector) || user.name;
   // A sample collected earlier and registered late keeps its real collection time.
   const collectedAt = clean(input.collected_at);
 
   return db.tx(() => {
     const now = nowIso();
     const patientId = Number(db.run(
-      `INSERT INTO patients (full_name, gender, dob, mobile, email, address, city, state, pincode, created_by, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      patient.full_name, patient.gender, patient.dob, patient.mobile, patient.email || null, patient.address || null,
+      `INSERT INTO patients (full_name, gender, dob, age_years, mobile, email, address, city, state, pincode, created_by, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      patient.full_name, patient.gender, patient.dob, patient.age_years, patient.mobile, patient.email || null, patient.address || null,
       patient.city, patient.state, patient.pincode, user.id, now,
     ).lastInsertRowid);
     const sampleId = newSampleId(db);
     const pk = Number(db.run(
       `INSERT INTO samples (sample_id, patient_id, test_id, account_id, registered_by, registered_at, status, partner_ref,
          referring_doctor, clinical_notes, consent_testing, consent_data_use, consent_method, duplicate_reason)
-       VALUES (?, ?, ?, ?, ?, ?, 'REGISTERED', ?, ?, ?, 1, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, 'REGISTERED', ?, ?, ?, ?, ?, ?, ?)`,
       sampleId, patientId, test.id, account.id, user.id, now, clean(input.partner_ref) || null,
-      clean(input.referring_doctor) || null, clean(input.clinical_notes) || null,
+      clean(input.referring_doctor) || null, clean(input.clinical_notes) || null, input.consent_testing === 'yes' ? 1 : 0,
       input.consent_data_use === 'yes' ? 1 : 0, consentMethod, duplicate ? dupReason : null,
     ).lastInsertRowid);
     addEvent(db, pk, null, 'REGISTERED', user.id, duplicate ? `Possible duplicate of ${duplicate.sample_id}: ${dupReason}` : null);
@@ -235,7 +254,7 @@ function collect(db, user, sampleId, { collector, collectedAt }) {
   return db.tx(() => {
     const s = load(db, user, sampleId);
     if (s.status !== 'REGISTERED') throw new UserError(`This sample is already "${STATUSES[s.status]}".`);
-    if (!clean(collector)) throw new UserError('Enter who collected the sample.');
+    collector = clean(collector) || user.name;
     // A form's datetime-local value ("2026-10-05T14:30") is India time.
     const raw = collectedAt || nowIso();
     const when = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(raw) ? new Date(raw + ':00+05:30') : new Date(raw);
@@ -261,8 +280,11 @@ function editPatient(db, user, sampleId, input) {
     if (!canEditPatient(user, s)) throw new UserError('Patient details can no longer be changed from your account. Contact the lab.');
     const before = db.get('SELECT * FROM patients WHERE id = ?', s.patient_id);
     const p = validatePatient(input);
-    db.run('UPDATE patients SET full_name = ?, gender = ?, dob = ?, mobile = ?, email = ?, address = ?, city = ?, state = ?, pincode = ? WHERE id = ?',
-      p.full_name, p.gender, p.dob, p.mobile, p.email || null, p.address || null, p.city, p.state, p.pincode, s.patient_id);
+    // An unchanged age keeps the age given at registration, so it is not
+    // re-dated to today's registration year.
+    if (!p.dob && before.age_years != null && p.age_years === patientAge(before)) p.age_years = before.age_years;
+    db.run('UPDATE patients SET full_name = ?, gender = ?, dob = ?, age_years = ?, mobile = ?, email = ?, address = ?, city = ?, state = ?, pincode = ? WHERE id = ?',
+      p.full_name, p.gender, p.dob, p.age_years, p.mobile, p.email || null, p.address || null, p.city, p.state, p.pincode, s.patient_id);
     const changed = {};
     for (const k of Object.keys(p)) if ((before[k] || '') !== (p[k] || '')) changed[k] = { from: before[k], to: p[k] };
     if (Object.keys(changed).length) audit(db, user.id, 'patient_edited', 'sample', s.sample_id, changed);
@@ -291,6 +313,6 @@ function cancel(db, user, sampleId, { reason, refundPaise }) {
 
 module.exports = {
   STATUSES, BEFORE_LAB, GENDERS, STATES, scope, canRegister, registeringAccount, validatePatient, findDuplicate,
-  register, load, collect, canEditPatient, editPatient, cancel,
+  register, load, patientAge, ageFromDob, collect, canEditPatient, editPatient, cancel,
   checkFormat, formatSampleId, sampleIdFormat, nextSampleNumber, setNextSampleNumber,
 };

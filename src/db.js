@@ -347,6 +347,10 @@ const MIGRATIONS = [
   );
   CREATE INDEX counsellor_slots_time ON counsellor_slots(status, starts_at);
   CREATE UNIQUE INDEX counsellor_slots_one ON counsellor_slots(counsellor_id, starts_at) WHERE status != 'removed';
+  `,  // 7: age in years, for patients registered without a date of birth
+  // (empty text marks a blank optional field in the older NOT NULL columns)
+  `
+  ALTER TABLE patients ADD COLUMN age_years INTEGER;
   `,
 ];
 

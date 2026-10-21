@@ -69,11 +69,13 @@ test('a franchise checks, then registers the good rows with credit billing', () 
   assert.match(again[0].errors.join(' '), /last 90 days/);
 });
 
-test('the central lab needs payment; suppliers need their price', () => {
+test('central lab payment is optional (pending); suppliers need their price', () => {
   const { db, admin, sup } = fresh();
-  const a = bulk.check(db, admin, filled(db, admin, [row(), row({ full_name: 'Paid One', mobile: '9822033333', payment: 'upi' })]));
-  assert.match(a[0].errors.join(' '), /Payment/);
+  const a = bulk.check(db, admin, filled(db, admin, [row(), row({ full_name: 'Paid One', mobile: '9822033333', payment: 'upi' }), row({ full_name: 'Bad Pay', mobile: '9822055555', payment: 'cheque' })]));
+  assert.equal(a[0].errors.length, 0);
+  assert.equal(a[0].input.direct.paymentMode, 'pending');
   assert.equal(a[1].errors.length, 0);
+  assert.match(a[2].errors.join(' '), /Payment/);
   const s = bulk.check(db, sup, filled(db, sup, [row({ patient_price: '9,000', gst: '18' }), row({ full_name: 'No Price', mobile: '9822044444', gst: '18' })]));
   assert.equal(s[0].errors.length, 0);
   assert.ok(s[1].errors.length);

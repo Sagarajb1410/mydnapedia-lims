@@ -420,7 +420,7 @@ function api(db, storage, req) {
   if (req.action === 'find') {
     const files = [...reports.forSample(db, s.id).map((r) => r.file_name), ...counselling.plansFor(db, s.id).map((r) => r.file_name), ...docs(db, s.id).map((d) => d.file_name)];
     return {
-      sample: { sampleId: s.sample_id, name: p.full_name, gender: p.gender, age: ageOf(p.dob), dob: p.dob, phone: p.mobile, email: p.email || '', address: p.address || '', city: [p.city, p.state, p.pincode].filter(Boolean).join(', '), files },
+      sample: { sampleId: s.sample_id, name: p.full_name, gender: p.gender, age: p.dob ? ageOf(p.dob) : String(samples.patientAge(p) ?? ''), dob: p.dob || '', phone: p.mobile || '', email: p.email || '', address: p.address || '', city: [p.city, p.state, p.pincode].filter(Boolean).join(', '), files },
       stage: samples.STATUSES[s.status],
       hasCase: Boolean(caseFor(db, storage, user, s)),
     };

@@ -16,12 +16,12 @@ function columns(user) {
   const supplier = user.role === 'partner' && user.account_type === 'supplier';
   const direct = user.role !== 'partner';
   return [
-    ['full_name', 'Patient full name', true], ['gender', 'Gender (Male/Female/Other)', true], ['dob', 'Date of birth (DD/MM/YYYY)', true],
-    ['mobile', 'Mobile', true], ['email', 'Email', false], ['address', 'Address', false], ['city', 'City', true], ['state', 'State', true],
-    ['pincode', 'Pincode', true], ['test', 'Test', true], ['consent', 'Consent (Signed form/Verbal)', true], ['data_use', 'Data use for research (Yes/No)', false],
+    ['full_name', 'Patient full name', true], ['gender', 'Gender (Male/Female/Other)', true], ['age', 'Age (years)', true], ['dob', 'Date of birth (DD/MM/YYYY)', false],
+    ['mobile', 'Mobile', false], ['email', 'Email', false], ['address', 'Address', false], ['city', 'City', false], ['state', 'State', false],
+    ['pincode', 'Pincode', false], ['test', 'Test', true], ['consent', 'Consent (Signed form/Verbal)', false], ['data_use', 'Data use for research (Yes/No)', false],
     ['collected_by', 'Collected by (leave empty if not collected yet)', false], ['collected_on', 'Collected on (DD/MM/YYYY, empty = today)', false], ['partner_ref', 'Your reference', false], ['doctor', 'Referring doctor', false],
     ...(supplier ? [['patient_price', 'Your price to patient (Rs)', true], ['patient_discount', 'Your discount (Rs)', false], ['gst', 'GST % on your bill (0/5/12/18)', true]] : []),
-    ...(direct ? [['payment', 'Payment (Cash/UPI/Card/Bank transfer/Pending)', true], ['payment_ref', 'Payment reference', false]] : []),
+    ...(direct ? [['payment', 'Payment (Cash/UPI/Card/Bank transfer/Pending)', false], ['payment_ref', 'Payment reference', false]] : []),
     ['repeat_reason', 'Repeat reason (only if the same test was done in the last 90 days)', false],
   ];
 }
@@ -35,10 +35,11 @@ function template(db, user) {
       name: 'How to fill', widths: [30, 70], rows: [
         { cells: ['How to fill the Samples sheet'], style: 'title' },
         ['One row per sample.', 'Columns marked * are required. Leave the header row as it is.'],
-        ['Date of birth', 'Day/month/year, for example 11/02/1990.'],
-        ['Mobile', '10-digit Indian mobile number.'],
+        ['Age', 'Age in years. Only name, gender, age and test are required.'],
+        ['Date of birth', 'Optional. Day/month/year, for example 11/02/1990. If given, the age is worked out from it.'],
+        ['Mobile', 'Optional. 10-digit Indian mobile number. Without it the patient gets no WhatsApp messages.'],
         ['Test', 'The test name or short name exactly as listed below.'],
-        ['Consent', 'Write "Signed form" or "Verbal". The patient must have consented to the test.'],
+        ['Consent', 'Optional. Write "Signed form" or "Verbal".'],
         ['Collected by', 'Fill this in only if the sample has already been collected.'],
         [`Up to ${MAX_ROWS} rows`, 'You will see a check of every row before anything is registered.'],
         { cells: ['Tests'], style: 'header' },
@@ -80,7 +81,8 @@ function check(db, user, file) {
   const head = (grid[0] || []).map((h) => low(h).replace(/\s*\*$/, ''));
   const at = {};
   for (const [key, label] of cols) at[key] = head.indexOf(low(label));
-  const missing = cols.filter(([k, , req]) => req && at[k] < 0).map(([, l]) => l);
+  // Older templates have no Age column; their date of birth column stands in.
+  const missing = cols.filter(([k, , req]) => req && at[k] < 0 && !(k === 'age' && at.dob >= 0)).map(([, l]) => l);
   if (missing.length) throw new UserError(`The file does not match the template. Missing columns: ${missing.join(', ')}. Please download the template again and copy your rows into it.`);
   const body = grid.slice(1).map((r, i) => ({ r, line: i + 2 })).filter(({ r }) => r.some((c) => String(c || '').trim()));
   if (!body.length) throw new UserError('The sheet has no sample rows.');
@@ -96,13 +98,12 @@ function check(db, user, file) {
     const test = tests.find((t) => [t.name, t.short_name, t.code].some((n) => low(n) === low(v('test'))));
     const consent = /^signed/i.test(v('consent')) ? 'Signed form' : /^(verbal|confirmed verbally)/i.test(v('consent')) ? 'Confirmed verbally by patient' : '';
     const input = {
-      full_name: v('full_name'), gender: gender || v('gender'), dob: parseDob(v('dob')), mobile: v('mobile'), email: v('email'), address: v('address'),
+      full_name: v('full_name'), gender: gender || v('gender'), age_years: v('age').replace(/\.0+$/, ''), dob: v('dob') ? parseDob(v('dob')) : '', mobile: v('mobile'), email: v('email'), address: v('address'),
       city: v('city'), state: state || v('state'), pincode: v('pincode').replace(/\.0+$/, ''), test_id: test ? String(test.id) : '',
-      consent_testing: 'yes', consent_method: consent, consent_data_use: /^y/i.test(v('data_use')) ? 'yes' : 'no',
-      collected_now: v('collected_by') ? 'yes' : '', collector: v('collected_by'), collected_at: collectedOn(v('collected_on')),
+      consent_testing: consent ? 'yes' : '', consent_method: consent, consent_data_use: /^y/i.test(v('data_use')) ? 'yes' : 'no',
+      collected_now: v('collected_by') || v('collected_on') ? 'yes' : '', collector: v('collected_by'), collected_at: collectedOn(v('collected_on')),
       partner_ref: v('partner_ref'), referring_doctor: v('doctor'), duplicate_reason: v('repeat_reason'),
     };
-    if (v('collected_on') && !v('collected_by')) errors.push('Enter who collected the sample, or leave "Collected on" empty.');
     if (input.collected_at === 'bad') errors.push('Write the collection date as DD/MM/YYYY.');
     else if (input.collected_at) {
       const day = input.collected_at.slice(0, 10);
@@ -113,7 +114,7 @@ function check(db, user, file) {
     let patient;
     try { patient = samples.validatePatient(input); } catch (e) { errors.push(e.message); }
     if (!test) errors.push(v('test') ? `Unknown test "${v('test')}".` : 'Enter the test.');
-    if (!consent) errors.push('Write "Signed form" or "Verbal" for consent.');
+    if (v('consent') && !consent) errors.push('Write "Signed form" or "Verbal" for consent, or leave it empty.');
     if (at.patient_price >= 0) {
       try {
         input.supplier = { patientPricePaise: toPaise(v('patient_price')), discountPaise: v('patient_discount') ? toPaise(v('patient_discount')) : 0, gstRateBp: GST[Number(v('gst').replace('%', ''))] };
@@ -123,12 +124,12 @@ function check(db, user, file) {
     }
     if (at.payment >= 0) {
       const pay = PAYMENTS.find((p) => low(p) === low(v('payment')));
-      if (!pay) errors.push('Payment must be Cash, UPI, Card, Bank transfer or Pending.');
-      input.direct = { paymentMode: pay === 'Pending' ? 'pending' : pay, paymentRef: v('payment_ref'), discountPaise: 0 };
+      if (v('payment') && !pay) errors.push('Payment must be Cash, UPI, Card, Bank transfer or Pending, or left empty.');
+      input.direct = { paymentMode: !pay || pay === 'Pending' ? 'pending' : pay, paymentRef: v('payment_ref'), discountPaise: 0 };
     }
     let duplicate = null;
     if (patient && test) {
-      const key = `${patient.mobile}|${patient.dob}|${test.id}`;
+      const key = `${patient.mobile || patient.full_name.toLowerCase()}|${patient.dob || patient.age_years}|${test.id}`;
       if (seen.has(key) && !input.duplicate_reason) errors.push(`Same patient and test as row ${seen.get(key)}. Remove one, or give a repeat reason.`);
       seen.set(key, line);
       duplicate = samples.findDuplicate(db, user, patient, test.id);

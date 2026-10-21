@@ -97,13 +97,31 @@ test('duplicate within 90 days asks for a reason', () => {
   assert.ok(third.sample);
 });
 
-test('validation catches bad dates, mobiles and missing consent', () => {
+test('validation catches bad dates and mobiles when they are given', () => {
   const { db, user } = fresh();
   const sun = user('sunrise@demo.example');
   const t = String(db.get("SELECT id FROM tests WHERE code = 'MDPFIT'").id);
   assert.throws(() => samples.register(db, sun, { ...patient({ dob: istDate() }), test_id: t }), /future/);
   assert.throws(() => samples.register(db, sun, { ...patient({ mobile: '12345' }), test_id: t }), /mobile/);
-  assert.throws(() => samples.register(db, sun, { ...patient({ consent_testing: '' }), test_id: t }), /consent/);
+  assert.throws(() => samples.register(db, sun, { full_name: 'No Age', gender: 'Male', test_id: t }), /age/);
+  assert.throws(() => samples.register(db, sun, { full_name: 'Old', gender: 'Male', age_years: '130', test_id: t }), /age/);
+});
+
+test('only name, gender and age are compulsory', () => {
+  const { db, user } = fresh();
+  const sun = user('sunrise@demo.example');
+  const t = String(db.get("SELECT id FROM tests WHERE code = 'MDPFIT'").id);
+  const { sample } = samples.register(db, sun, { full_name: 'Bare Minimum', gender: 'Female', age_years: '42', test_id: t });
+  const p = db.get('SELECT * FROM patients WHERE id = ?', sample.patient_id);
+  assert.equal(p.age_years, 42);
+  assert.equal(p.dob, '');
+  assert.equal(samples.patientAge(p), 42);
+  assert.equal(sample.consent_testing, 0);
+  assert.equal(db.get("SELECT count(*) n FROM notifications WHERE sample_pk = ? AND code = 'N1'", sample.id).n, 0, 'no patient message without a mobile or email');
+  // A date of birth, when given, sets the age.
+  const y = Number(istDate().slice(0, 4)) - 30;
+  const b = samples.register(db, sun, { ...patient({ dob: `${y}-01-01`, mobile: '9822077777' }), age_years: '', test_id: t }).sample;
+  assert.equal(db.get('SELECT age_years FROM patients WHERE id = ?', b.patient_id).age_years, 30);
 });
 
 test('partners only see their own samples', () => {

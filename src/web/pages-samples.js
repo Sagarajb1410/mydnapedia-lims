@@ -96,7 +96,7 @@ ${pendingRecharges ? html`<div class="flash warn" style="margin:12px 0 0">${icon
     if (status) { where.push('s.status = ?'); params.push(status); } else if (phase) { where.push(`s.status IN (${phase.statuses.map(() => '?').join(',')})`); params.push(...phase.statuses); }
     if (isStaff(u) && ctx.query.account) { where.push('s.account_id = ?'); params.push(Number(ctx.query.account)); }
     const rows = db.all(
-      `SELECT s.*, p.full_name, p.mobile, p.gender, p.dob, p.city, t.name AS test_name, a.name AS account_name, a.type AS account_type, b.net_paise, b.status AS bill_status
+      `SELECT s.*, p.full_name, p.mobile, p.gender, p.dob, p.age_years, p.created_at AS patient_created_at, p.city, t.name AS test_name, a.name AS account_name, a.type AS account_type, b.net_paise, b.status AS bill_status
          FROM samples s JOIN patients p ON p.id = s.patient_id JOIN tests t ON t.id = s.test_id
          JOIN accounts a ON a.id = s.account_id LEFT JOIN bills b ON b.sample_pk = s.id
         WHERE ${where.join(' AND ')} ORDER BY s.id DESC LIMIT 200`, ...params);
@@ -111,12 +111,9 @@ ${pendingRecharges ? html`<div class="flash warn" style="margin:12px 0 0">${icon
       const qs = new URLSearchParams({ ...(q ? { q } : {}), ...(ctx.query.account ? { account: ctx.query.account } : {}), ...extra });
       return `/samples${qs.toString() ? `?${qs}` : ''}`;
     };
-    const age = (dob) => {
-      if (!dob) return '';
-      const d = new Date(dob); const now = new Date();
-      let y = now.getFullYear() - d.getFullYear();
-      if (now < new Date(now.getFullYear(), d.getMonth(), d.getDate())) y--;
-      return `${y} y`;
+    const age = (r) => {
+      const y = samples.patientAge({ dob: r.dob, age_years: r.age_years, created_at: r.patient_created_at });
+      return y == null ? '' : `${y} y`;
     };
     const title = u.role === 'partner' ? 'Your samples' : u.role === 'counsellor' ? 'Clients' : 'Samples';
     h.send(ctx, title, html`<div class="head"><div><h1>${title}</h1><p class="sub">${q ? html`Results for “${q}” · ` : ''}${rows.length} shown${rows.length === 200 ? ' (latest 200)' : ''}</p></div>
@@ -131,11 +128,29 @@ ${isStaff(u) ? html`<select name="account" aria-label="Registered by"><option va
 <button class="light">Apply</button>${q || ctx.query.account ? html`<a class="btn light" href="${link({}).replace(/\?.*/, '')}">Clear</a>` : ''}</form>
 <div class="table-wrap"><table class="stack"><thead><tr><th>Sample ID</th><th>${u.role === 'counsellor' ? 'Client' : 'Patient'}</th><th>Test</th>${isStaff(u) ? html`<th>Registered by</th>` : ''}<th>Status</th><th>Registered</th>${u.role === 'counsellor' ? '' : html`<th class="num">Billed</th>`}</tr></thead><tbody>
 ${rows.map((r) => html`<tr data-href="/samples/${r.sample_id}"><td><a class="mono" href="/samples/${r.sample_id}">${r.sample_id}</a></td>
-<td><b>${r.full_name}</b><br><span class="muted">${[r.gender, age(r.dob), r.city].filter(Boolean).join(' · ')}</span></td><td>${r.test_name}</td>
+<td><b>${r.full_name}</b><br><span class="muted">${[r.gender, age(r), r.city].filter(Boolean).join(' · ')}</span></td><td>${r.test_name}</td>
 ${isStaff(u) ? html`<td>${r.account_name}${r.partner_ref ? html`<br><span class="muted">Ref ${r.partner_ref}</span>` : ''}</td>` : ''}<td>${statusPill(r.status, samples.STATUSES[r.status])}</td><td class="nw">${fmtDate(r.registered_at)}<br><span class="muted">${r.mobile}</span></td>
 ${u.role === 'counsellor' ? '' : html`<td class="num">${r.net_paise == null ? '' : rupees(r.net_paise)}${r.bill_status === 'reversed' ? html`<br><span class="pill">reversed</span>` : ''}</td>`}</tr>`)}
 ${rows.length ? '' : html`<tr><td colspan="7"><div class="empty">${icon('search')}No samples match.${samples.canRegister(u) && !q ? html` <a href="/samples/new">Register the first one</a>.` : ''}</div></td></tr>`}</tbody></table></div>`);
   });
+
+  // Patient fields shared by registration and editing. Only name, gender and
+  // age are compulsory; a date of birth, when entered, fills the age in.
+  function patientFields(v) {
+    return html`${field('Full name', 'full_name', v('full_name'), { required: true })}
+${select('Gender', 'gender', samples.GENDERS, v('gender'), { required: true })}
+${field('Age (years)', 'age_years', v('age_years'), { type: 'number', required: true, attrs: 'min="0" max="120" step="1" inputmode="numeric"' })}
+${field('Date of birth', 'dob', v('dob'), { type: 'date', opt: true, attrs: `max="${istDate()}"` })}
+${field('Mobile (WhatsApp)', 'mobile', v('mobile'), { opt: true, attrs: 'inputmode="numeric" placeholder="10 digits"' })}
+${field('Email', 'email', v('email'), { type: 'email', opt: true })}
+${field('Address', 'address', v('address'), { opt: true })}
+${field('City', 'city', v('city'), { opt: true })}
+${select('State', 'state', samples.STATES, v('state'), { opt: true })}
+${field('Pincode', 'pincode', v('pincode'), { opt: true, attrs: 'inputmode="numeric"' })}
+<script>(function(){var d=document.getElementById('dob'),a=document.getElementById('age_years');if(!d||!a)return;
+function f(){if(!d.value)return;var b=d.value.split('-').map(Number),t=new Date(),y=t.getFullYear()-b[0];if(t.getMonth()+1<b[1]||(t.getMonth()+1===b[1]&&t.getDate()<b[2]))y--;if(y>=0)a.value=y}
+d.addEventListener('change',f)})()</script>`;
+  }
 
   // ---------- Registration ----------
   function registrationForm(ctx, values = {}, duplicate = null) {
@@ -152,7 +167,7 @@ ${rows.length ? '' : html`<tr><td colspan="7"><div class="empty">${icon('search'
 <p class="sub">Registering for <b>${account.name}</b>. ${kind === 'partner' ? html`Credit balance: <b class="${bal < 0 ? 'neg' : ''}">${rupees(bal)}</b>. The test price is deducted when you save.` : ''}
 ${kind === 'supplier' ? 'You bill the patient under your own company name and GST number.' : ''}${kind === 'main' ? 'Direct registration at our standard price.' : ''}
 Registering many? <a href="/samples/bulk">Upload an Excel sheet</a>.</p>
-${duplicate ? html`<div class="flash warn">This looks like a repeat: the same mobile, date of birth and test were registered as <b>${duplicate.sample_id}</b> on ${fmtDate(duplicate.registered_at)}. To register again, give a reason below and save.</div>` : ''}
+${duplicate ? html`<div class="flash warn">This looks like a repeat: the same mobile, patient and test were registered as <b>${duplicate.sample_id}</b> on ${fmtDate(duplicate.registered_at)}. To register again, give a reason below and save.</div>` : ''}
 <form method="post" action="/samples/new">
 <div class="card"><h2 style="margin-top:0">Test</h2><div class="grid">
 ${select('Test', 'test_id', priced.filter((t) => t.price != null).map((t) => [t.id, `${t.name} (${rupees(t.price)})`]), v('test_id'), { required: true })}
@@ -160,15 +175,7 @@ ${field('Your reference number', 'partner_ref', v('partner_ref'), { opt: true })
 ${field('Referring doctor', 'referring_doctor', v('referring_doctor'), { opt: true })}
 </div></div>
 <div class="card"><h2 style="margin-top:0">Patient</h2><div class="grid">
-${field('Full name', 'full_name', v('full_name'), { required: true })}
-${select('Gender', 'gender', samples.GENDERS, v('gender'), { required: true })}
-${field('Date of birth', 'dob', v('dob'), { type: 'date', required: true, attrs: `max="${istDate()}"` })}
-${field('Mobile (WhatsApp)', 'mobile', v('mobile'), { required: true, attrs: 'inputmode="numeric" placeholder="10 digits"' })}
-${field('Email', 'email', v('email'), { type: 'email', opt: true })}
-${field('Address', 'address', v('address'), { opt: true })}
-${field('City', 'city', v('city'), { required: true })}
-${select('State', 'state', samples.STATES, v('state'), { required: true })}
-${field('Pincode', 'pincode', v('pincode'), { required: true, attrs: 'inputmode="numeric"' })}
+${patientFields(v)}
 </div><div style="margin-top:12px"><label for="clinical_notes">Clinical notes <span class="opt">(optional)</span></label><textarea id="clinical_notes" name="clinical_notes">${v('clinical_notes')}</textarea></div></div>
 ${kind === 'supplier' ? html`<div class="card"><h2 style="margin-top:0">Your bill to the patient</h2><div class="grid">
 ${field('Your price to the patient (₹)', 'patient_price', v('patient_price'), { required: true, attrs: 'inputmode="decimal"' })}
@@ -176,14 +183,14 @@ ${field('Your discount (₹)', 'patient_discount', v('patient_discount', '0'), {
 ${select('GST rate on your bill', 'gst_rate', GST_RATES, v('gst_rate', '1800'), { required: true })}
 </div><p class="muted" style="margin-bottom:0">Your discount changes only your bill to the patient. MyDNAPedia's transfer price to you stays the same.</p></div>` : ''}
 ${kind === 'main' ? html`<div class="card"><h2 style="margin-top:0">Payment</h2><div class="grid">
-${select('Paid by', 'payment_mode', PAY_MODES, v('payment_mode'), { required: true })}
+${select('Paid by', 'payment_mode', PAY_MODES, v('payment_mode'), { opt: true, placeholder: 'Payment pending' })}
 ${field('Payment reference', 'payment_ref', v('payment_ref'), { opt: true })}
 ${u.role === 'admin' ? field('Discount (₹)', 'discount', v('discount', '0'), { attrs: 'inputmode="decimal"' }) : ''}
 </div></div>` : ''}
 <div class="card"><h2 style="margin-top:0">Consent</h2>
-<label class="check"><input type="checkbox" name="consent_testing" value="yes" ${v('consent_testing') === 'yes' ? raw('checked') : ''} required> The patient agrees to this genetic test and to MyDNAPedia processing their sample and data for it.</label>
+<label class="check"><input type="checkbox" name="consent_testing" value="yes" ${v('consent_testing') === 'yes' ? raw('checked') : ''}> The patient agrees to this genetic test and to MyDNAPedia processing their sample and data for it.</label>
 <label class="check"><input type="checkbox" name="consent_data_use" value="yes" ${v('consent_data_use') === 'yes' ? raw('checked') : ''}> The patient also agrees that their anonymised data may be used to improve our services. <span class="muted">(optional)</span></label>
-<div class="grid" style="margin-top:8px">${select('How was consent taken?', 'consent_method', ['Signed form', 'Confirmed verbally by patient'], v('consent_method'), { required: true })}</div></div>
+<div class="grid" style="margin-top:8px">${select('How was consent taken?', 'consent_method', ['Signed form', 'Confirmed verbally by patient'], v('consent_method'), { opt: true })}</div></div>
 <div class="card"><h2 style="margin-top:0">Collection</h2>
 <label class="check"><input type="checkbox" name="collected_now" value="yes" ${v('collected_now') === 'yes' ? raw('checked') : ''}> The sample is already collected (now or earlier).</label>
 <div class="grid">${field('Collected by', 'collector', v('collector'), { opt: true })}${field('Collection date and time', 'collected_at', v('collected_at'), { type: 'datetime-local', opt: true, attrs: `max="${maxLocal()}"` })}</div>
@@ -205,7 +212,7 @@ ${duplicate ? html`<div class="card">${field('Reason for registering again', 'du
       input.supplier = { patientPricePaise: toPaise(b.patient_price), discountPaise: b.patient_discount ? toPaise(b.patient_discount) : 0, gstRateBp: Number(b.gst_rate) || 0 };
     }
     if (ctx.user.role !== 'partner') {
-      input.direct = { paymentMode: b.payment_mode, paymentRef: b.payment_ref, discountPaise: b.discount ? toPaise(b.discount) : 0 };
+      input.direct = { paymentMode: b.payment_mode || 'pending', paymentRef: b.payment_ref, discountPaise: b.discount ? toPaise(b.discount) : 0 };
     }
     const out = samples.register(db, ctx.user, input);
     if (out.duplicate) {
@@ -242,9 +249,9 @@ ${duplicate ? html`<div class="card">${field('Reason for registering again', 'du
     const early = samples.BEFORE_LAB.includes(s.status);
     const canCancel = !['CANCELLED', 'CLOSED', 'DELIVERED'].includes(s.status) && (early ? u.role !== 'counsellor' : u.role === 'admin');
     const patientCard = html`<div class="card"><h2>${u.role === 'counsellor' ? 'Client' : 'Patient'}</h2><dl class="facts">
-<dt>Name</dt><dd>${p.full_name}</dd><dt>Gender</dt><dd>${p.gender}</dd><dt>Date of birth</dt><dd>${fmtDate(p.dob)}</dd>
-<dt>Mobile</dt><dd>${p.mobile}</dd><dt>Email</dt><dd>${p.email || '—'}</dd><dt>Address</dt><dd>${[p.address, p.city, p.state, p.pincode].filter(Boolean).join(', ')}</dd>
-<dt>Consent</dt><dd>Test: yes · Data use: ${s.consent_data_use ? 'yes' : 'no'} · ${s.consent_method}</dd>
+<dt>Name</dt><dd>${p.full_name}</dd><dt>Gender</dt><dd>${p.gender}</dd><dt>Age</dt><dd>${samples.patientAge(p) ?? '—'}${p.dob ? ` (born ${fmtDate(p.dob)})` : ''}</dd>
+<dt>Mobile</dt><dd>${p.mobile || '—'}</dd><dt>Email</dt><dd>${p.email || '—'}</dd><dt>Address</dt><dd>${[p.address, p.city, p.state, p.pincode].filter(Boolean).join(', ') || '—'}</dd>
+<dt>Consent</dt><dd>Test: ${s.consent_testing ? 'yes' : 'not recorded'} · Data use: ${s.consent_data_use ? 'yes' : 'no'}${s.consent_method ? ` · ${s.consent_method}` : ''}</dd>
 ${s.clinical_notes ? html`<dt>Clinical notes</dt><dd>${s.clinical_notes}</dd>` : ''}</dl></div>`;
     const sampleCard = html`<div class="card"><h2>Sample</h2><dl class="facts">
 <dt>Test</dt><dd>${t.name}</dd><dt>Sample type</dt><dd>${t.sample_type}</dd>
@@ -255,7 +262,8 @@ ${isStaff(u) ? html`<dt>Processing</dt><dd>${ROUTE_LABEL[t.route]} · TAT ${t.ta
 ${s.partner_ref ? html`<dt>Reference</dt><dd>${s.partner_ref}</dd>` : ''}${s.referring_doctor ? html`<dt>Doctor</dt><dd>${s.referring_doctor}</dd>` : ''}
 ${s.duplicate_reason ? html`<dt>Repeat reason</dt><dd>${s.duplicate_reason}</dd>` : ''}${s.cancel_reason ? html`<dt>Cancelled</dt><dd>${s.cancel_reason}</dd>` : ''}</dl>
 ${s.status === 'REGISTERED' && u.role !== 'counsellor' ? html`<form method="post" action="/samples/${s.sample_id}/collect" class="noprint" style="margin-top:16px;border-top:1px solid var(--line);padding-top:14px">
-<b>Mark as collected</b><div class="grid" style="margin-top:10px">${field('Collected by', 'collector', '', { required: true })}${field('Date and time', 'collected_at', '', { type: 'datetime-local', required: true, attrs: `max="${maxLocal()}"` })}</div>
+<b>Mark as collected</b><div class="grid" style="margin-top:10px">${field('Collected by', 'collector', '', { opt: true })}${field('Date and time', 'collected_at', '', { type: 'datetime-local', opt: true, attrs: `max="${maxLocal()}"` })}</div>
+<p class="muted" style="margin:0">Empty fields mean you, now.</p>
 <div class="actions"><button>Mark collected</button></div></form>` : ''}</div>`;
     const billingCard = u.role === 'counsellor' ? '' : html`<div class="card"><h2>Billing</h2>${bill ? html`<dl class="facts">
 <dt>Bill number</dt><dd class="mono">${bill.bill_no}</dd>
@@ -344,16 +352,12 @@ ${!['ON_HOLD', 'CANCELLED', 'CLOSED', 'DELIVERED', 'REJECTED', 'RECOLLECTION_REQ
     h.send(ctx, 'Edit patient', html`<p><a href="/samples/${ctx.params.id}">← ${ctx.params.id}</a></p><h1>Edit patient details</h1>
 <p class="sub">Every change is recorded in the audit trail with the old value.</p>
 <form method="post" class="card"><div class="grid">
-${field('Full name', 'full_name', v('full_name'), { required: true })}${select('Gender', 'gender', samples.GENDERS, v('gender'), { required: true })}
-${field('Date of birth', 'dob', v('dob'), { type: 'date', required: true })}${field('Mobile (WhatsApp)', 'mobile', v('mobile'), { required: true })}
-${field('Email', 'email', v('email'), { type: 'email', opt: true })}${field('Address', 'address', v('address'), { opt: true })}
-${field('City', 'city', v('city'), { required: true })}${select('State', 'state', samples.STATES, v('state'), { required: true })}
-${field('Pincode', 'pincode', v('pincode'), { required: true })}</div><div class="actions"><button>Save changes</button></div></form>`);
+${patientFields(v)}</div><div class="actions"><button>Save changes</button></div></form>`);
   }
   router.get('/samples/:id/edit', (ctx) => {
     const { s, p } = loadFull(ctx);
     if (!samples.canEditPatient(ctx.user, s)) throw new UserError('Patient details can no longer be changed from your account. Contact the lab.');
-    editForm(ctx, p);
+    editForm(ctx, { ...p, age_years: samples.patientAge(p) ?? '' });
   });
   router.post('/samples/:id/edit', (ctx) => {
     ctx.retry = (msg) => { ctx.flash = { type: 'error', text: msg }; editForm(ctx, ctx.body); };

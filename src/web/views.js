@@ -307,8 +307,8 @@ function field(label, name, value = '', { type = 'text', required = false, opt =
 <input id="${name}" name="${name}" type="${type}" value="${value ?? ''}" ${required ? raw('required') : ''} ${raw(attrs)}></div>`;
 }
 
-function select(label, name, options, value = '', { required = false, placeholder = 'Choose…' } = {}) {
-  return html`<div><label for="${name}">${label}</label><select id="${name}" name="${name}" ${required ? raw('required') : ''}>
+function select(label, name, options, value = '', { required = false, opt = false, placeholder = 'Choose…' } = {}) {
+  return html`<div><label for="${name}">${label}${opt ? html` <span class="opt">(optional)</span>` : ''}</label><select id="${name}" name="${name}" ${required ? raw('required') : ''}>
 <option value="">${placeholder}</option>${options.map((o) => {
     const [v, l] = Array.isArray(o) ? o : [o, o];
     return html`<option value="${v}" ${String(v) === String(value) ? raw('selected') : ''}>${l}</option>`;

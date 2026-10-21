@@ -127,7 +127,8 @@ const TIERS = { MDP360P: '360 Premium', MDPSKIN: 'Skin Health', MDPFIT: 'Fitness
 // which keeps this form when the client name matches the PDF.
 function toCaseFile({ sample, patient, test, form, reportDate, session, counsellorName, now = new Date().toISOString() }) {
   const r = istParts(reportDate || now);
-  const [dy, dm, dd] = patient.dob.split('-');
+  const [dy, dm, dd] = (patient.dob || '').split('-');
+  const age = patient.dob ? ageOn(patient.dob, now) : require('./samples').patientAge(patient);
   const data = { life: {}, ...form };
   const sessionWhen = session ? istParts(session.scheduled_at) : null;
   return {
@@ -137,13 +138,13 @@ function toCaseFile({ sample, patient, test, form, reportDate, session, counsell
     patient: {
       name: patient.full_name,
       gender: patient.gender,
-      age: String(ageOn(patient.dob, now)),
+      age: age == null ? '' : String(age),
       sampleId: sample.sample_id,
       reportDate: `${r.p(r.d)}-${MONTHS[r.m]}-${r.y} ${r.hh}:${r.mm}`,
-      contact: patient.mobile,
+      contact: patient.mobile || '',
       email: patient.email || '',
       address: [patient.address, patient.city, patient.state, patient.pincode].filter(Boolean).join(', '),
-      dob: `${dd}/${dm}/${dy}`,
+      dob: patient.dob ? `${dd}/${dm}/${dy}` : '',
       kitId: '',
     },
     clinical: null,
