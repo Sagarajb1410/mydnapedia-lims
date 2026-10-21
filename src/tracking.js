@@ -26,11 +26,11 @@ function requireAdmin(user) {
 
 const clean = (v) => (v == null ? '' : String(v).trim());
 
-function setStatus(db, sample, to, user, note, extra = {}) {
+function setStatus(db, sample, to, user, note, extra = {}, at = nowIso()) {
   const cols = Object.keys(extra);
   db.run(`UPDATE samples SET status = ?${cols.map((c) => `, ${c} = ?`).join('')} WHERE id = ?`, to, ...cols.map((c) => extra[c]), sample.id);
   db.run('INSERT INTO sample_events (sample_pk, from_status, to_status, at, user_id, note) VALUES (?, ?, ?, ?, ?, ?)',
-    sample.id, sample.status, to, nowIso(), user.id, note || null);
+    sample.id, sample.status, to, at, user.id, note || null);
 }
 
 function sampleByPk(db, pk) {
@@ -206,7 +206,8 @@ function receive(db, user, sampleId, input) {
     if (!s.collected_at) {
       db.run('UPDATE samples SET collected_at = ?, collector = ? WHERE id = ?', s.registered_at, 'Not recorded before receipt', s.id);
     }
-    const now = nowIso();
+    // An old sample entered later passes the real receipt time.
+    const now = input.receivedAt || nowIso();
     const inShipment = db.get(
       `SELECT sh.* FROM shipment_items i JOIN shipments sh ON sh.id = i.shipment_id
         WHERE i.sample_pk = ? AND sh.leg = 1 AND sh.status != 'cancelled' ORDER BY sh.id DESC LIMIT 1`, s.id);
@@ -217,7 +218,7 @@ function receive(db, user, sampleId, input) {
     if (condition === 'Acceptable') {
       const due = tatDue(now, test.tat_days);
       setStatus(db, s, 'RECEIVED_AT_LAB', user, `Received in acceptable condition${note ? `. ${note}` : ''}. TAT due ${due.slice(0, 10)}.`,
-        { received_at: now, receipt_condition: condition, tat_due_at: due });
+        { received_at: now, receipt_condition: condition, tat_due_at: due }, now);
       const msg = `${lab}: Dear ${patient.full_name}, your sample ${s.sample_id} has reached our lab and testing has started. We will let you know when your report is ready.`;
       notify.queue(db, { code: 'N8', channel: 'whatsapp', recipient: patient.mobile, recipientName: patient.full_name, body: msg, samplePk: s.id });
       notify.queue(db, { code: 'N8', channel: 'email', recipient: patient.email, recipientName: patient.full_name, subject: 'Your sample has reached our lab', body: msg, samplePk: s.id });

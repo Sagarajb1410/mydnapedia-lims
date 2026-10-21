@@ -184,7 +184,8 @@ function findDuplicate(db, user, patient, testId) {
 
 // input: patient fields, test_id, consent, optional collection, and billing extras.
 // Returns { sample } or { duplicate } when a duplicate needs a reason first.
-function register(db, user, input) {
+// opts.registeredAt: the real registration time of an old sample (src/past.js).
+function register(db, user, input, opts = {}) {
   if (!canRegister(user)) throw new UserError('You cannot register samples.');
   const account = registeringAccount(db, user);
   if (!account) throw new UserError('Your account is not active. Contact the admin.');
@@ -203,7 +204,7 @@ function register(db, user, input) {
   const collectedAt = clean(input.collected_at);
 
   return db.tx(() => {
-    const now = nowIso();
+    const now = opts.registeredAt || nowIso();
     const patientId = Number(db.run(
       `INSERT INTO patients (full_name, gender, dob, age_years, mobile, email, address, city, state, pincode, created_by, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,

@@ -8,6 +8,7 @@ const tracking = require('../tracking');
 const invoice = require('../invoice');
 const track = require('../track');
 const quick = require('../quick');
+const past = require('../past');
 const { fmtDateTime, fmtDate, rupees, toPaise, UserError, getSetting, istDate } = require('../util');
 
 const PAY_MODES = ['Cash', 'UPI', 'Card', 'Bank transfer', ['pending', 'Payment pending']];
@@ -226,6 +227,12 @@ ${u.role === 'admin' ? field('Discount (₹)', 'discount', v('discount', '0'), {
 <label class="check"><input type="checkbox" name="consent_testing" value="yes" ${v('consent_testing') === 'yes' ? raw('checked') : ''}> The patient agrees to this genetic test and to MyDNAPedia processing their sample and data for it.</label>
 <label class="check"><input type="checkbox" name="consent_data_use" value="yes" ${v('consent_data_use') === 'yes' ? raw('checked') : ''}> The patient also agrees that their anonymised data may be used to improve our services. <span class="muted">(optional)</span></label>
 <div class="grid" style="margin-top:8px">${select('How was consent taken?', 'consent_method', ['Signed form', 'Confirmed verbally by patient'], v('consent_method'), { opt: true })}</div></div>
+${isStaff(u) ? html`<details class="card" ${v('past_registered') ? raw('open') : ''}><summary><b>Old sample?</b> <span class="muted">Already collected and received in the past, entered in the LIMS now</span></summary>
+<p class="muted">Give the real dates. The sample goes straight to "Received at lab" with those dates, the TAT counts from the receipt date, and no messages go to the patient or partner. Put your old sample number in "Your reference number" if it had one. Leave the Collection section below empty.</p>
+<div class="grid">${field('Registered on', 'past_registered', v('past_registered'), { type: 'date', attrs: `max="${istDate()}"` })}
+${field('Collected on', 'past_collected', v('past_collected'), { type: 'date', opt: true, attrs: `max="${istDate()}"` })}
+${field('Received at the lab on', 'past_received', v('past_received'), { type: 'date', opt: true, attrs: `max="${istDate()}"` })}</div>
+<p class="muted" style="margin-bottom:0">Collected on empty means the same day as registered. Received empty leaves it at "Collected".</p></details>` : ''}
 <div class="card"><h2 style="margin-top:0">Collection</h2>
 <label class="check"><input type="checkbox" name="collected_now" value="yes" ${v('collected_now') === 'yes' ? raw('checked') : ''}> The sample is already collected (now or earlier).</label>
 <div class="grid">${field('Collected by', 'collector', v('collector'), { opt: true })}${field('Collection date and time', 'collected_at', v('collected_at'), { type: 'datetime-local', opt: true, attrs: `max="${maxLocal()}"` })}</div>
@@ -249,12 +256,13 @@ ${duplicate ? html`<div class="card">${field('Reason for registering again', 'du
     if (ctx.user.role !== 'partner') {
       input.direct = { paymentMode: b.payment_mode || 'pending', paymentRef: b.payment_ref, discountPaise: b.discount ? toPaise(b.discount) : 0 };
     }
-    const out = samples.register(db, ctx.user, input);
+    const old = String(b.past_registered || '').trim();
+    const out = old ? past.register(db, ctx.user, input) : samples.register(db, ctx.user, input);
     if (out.duplicate) {
       ctx.flash = null;
       return registrationForm(ctx, b, out.duplicate);
     }
-    h.redirect(ctx, `/samples/${out.sample.sample_id}`, { type: 'ok', text: `Registered. Sample ID ${out.sample.sample_id}. Print the label and stick it on the tube.` });
+    h.redirect(ctx, `/samples/${out.sample.sample_id}`, { type: 'ok', text: old ? `Old sample registered as ${out.sample.sample_id} with its past dates. No messages were sent.` : `Registered. Sample ID ${out.sample.sample_id}. Print the label and stick it on the tube.` });
   });
 
   // Labels for several samples at once (after an Excel upload).

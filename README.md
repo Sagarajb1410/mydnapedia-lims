@@ -4,6 +4,8 @@ This is the working test version of the LIMS described in the MyDNAPedia LIMS Gu
 
 Built so far, in the guideline's priority order:
 
+**Old samples:** staff can enter a sample processed before it was in the LIMS. Open "Old sample?" on the registration form (or fill the two old-sample columns in the Excel upload) and give the registered, collected and received dates. It is entered with those dates and no messages go out.
+
 **One page for the daily steps:** the Samples list has a Next step button on each row (Collected, Message courier, Reached lab, then the receipt Acknowledgement), and tick boxes to do a step for many samples at once. The full Tracking screens are still there for pickups, rejections and dispatch.
 
 1. **Sample registration:** patient details (only name, gender and age are compulsory; a date of birth, if entered, fills in the age; a patient without a mobile gets no WhatsApp messages and cannot use self-tracking), consent, sample ID and Code 128 barcode, 50 x 25 mm labels, collection as a separate step, duplicate check, editing rules, cancellation.

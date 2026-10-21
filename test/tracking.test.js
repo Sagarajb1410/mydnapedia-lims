@@ -165,3 +165,22 @@ test('one-click steps from the Samples list: collected, courier, reached lab', (
   assert.equal(status(db, a), 'RECEIVED_AT_LAB');
   assert.ok(['9 am to 12 noon', '12 noon to 3 pm', '3 pm to 6 pm'].includes(quick.nextPickup().window));
 });
+
+test('an old sample is registered, collected and received with its past dates and no messages', () => {
+  const past = require('../src/past');
+  const { db, admin, lab, sun } = fresh();
+  const t = String(db.get("SELECT id FROM tests WHERE code = 'MDPFIT'").id);
+  const p = { full_name: 'Old Case', gender: 'Male', age_years: '50', mobile: '9822012345', test_id: t };
+  assert.throws(() => past.register(db, sun, { ...p, past_registered: '2026-03-01' }), /staff/);
+  assert.throws(() => past.register(db, lab, { ...p, past_registered: '2026-03-05', past_received: '2026-03-01' }), /before/);
+  const { sample } = past.register(db, admin, { ...p, direct: { paymentMode: 'Cash' }, past_registered: '2026-03-01', past_collected: '2026-03-01', past_received: '2026-03-03' });
+  const s = db.get('SELECT * FROM samples WHERE id = ?', sample.id);
+  assert.equal(s.status, 'RECEIVED_AT_LAB');
+  assert.equal(istDate(new Date(s.registered_at)), '2026-03-01');
+  assert.equal(istDate(new Date(s.received_at)), '2026-03-03');
+  assert.equal((new Date(s.tat_due_at) - new Date(s.received_at)) / 86400000, 21);
+  const ev = db.all('SELECT to_status, at FROM sample_events WHERE sample_pk = ? ORDER BY id', s.id).map((e) => `${e.to_status} ${istDate(new Date(e.at))}`);
+  assert.deepEqual(ev, ['REGISTERED 2026-03-01', 'COLLECTED 2026-03-01', 'RECEIVED_AT_LAB 2026-03-03']);
+  assert.equal(db.get("SELECT count(*) n FROM notifications WHERE sample_pk = ? AND status = 'pending'", s.id).n, 0);
+  assert.equal(istDate(new Date(db.get('SELECT created_at FROM bills WHERE sample_pk = ?', s.id).created_at)), '2026-03-01');
+});

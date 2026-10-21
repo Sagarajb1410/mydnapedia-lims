@@ -4,6 +4,7 @@
 const crypto = require('node:crypto');
 const xlsx = require('./xlsx');
 const samples = require('./samples');
+const past = require('./past');
 const { UserError, toPaise, istDate } = require('./util');
 
 const MAX_ROWS = 500;
@@ -23,6 +24,8 @@ function columns(user) {
     ...(supplier ? [['patient_price', 'Your price to patient (Rs)', true], ['patient_discount', 'Your discount (Rs)', false], ['gst', 'GST % on your bill (0/5/12/18)', true]] : []),
     ...(direct ? [['payment', 'Payment (Cash/UPI/Card/Bank transfer/Pending)', false], ['payment_ref', 'Payment reference', false]] : []),
     ['repeat_reason', 'Repeat reason (only if the same test was done in the last 90 days)', false],
+    // Old samples, entered after they were processed (staff only).
+    ...(['admin', 'lab'].includes(user.role) ? [['registered_on', 'Old sample: registered on (DD/MM/YYYY)', false], ['received_on', 'Old sample: received at lab on (DD/MM/YYYY)', false]] : []),
   ];
 }
 
@@ -41,6 +44,7 @@ function template(db, user) {
         ['Test', 'The test name or short name exactly as listed below.'],
         ['Consent', 'Optional. Write "Signed form" or "Verbal".'],
         ['Collected by', 'Fill this in only if the sample has already been collected.'],
+        ...(['admin', 'lab'].includes(user.role) ? [['Old samples', 'For samples processed before they were entered: fill "Old sample: registered on", and "received at lab on" if the lab had it. They are entered with those dates and no messages are sent.']] : []),
         [`Up to ${MAX_ROWS} rows`, 'You will see a check of every row before anything is registered.'],
         { cells: ['Tests'], style: 'header' },
         ...tests.map((t) => [t.name, t.short_name]),
@@ -104,7 +108,13 @@ function check(db, user, file) {
       collected_now: v('collected_by') || v('collected_on') ? 'yes' : '', collector: v('collected_by'), collected_at: collectedOn(v('collected_on')),
       partner_ref: v('partner_ref'), referring_doctor: v('doctor'), duplicate_reason: v('repeat_reason'),
     };
-    if (input.collected_at === 'bad') errors.push('Write the collection date as DD/MM/YYYY.');
+    const old = at.registered_on >= 0 && v('registered_on');
+    if (old) {
+      // An old sample: the past dates replace the usual collection rules.
+      Object.assign(input, { past_registered: parseDob(v('registered_on')), past_collected: v('collected_on') ? parseDob(v('collected_on')) : '', past_received: v('received_on') ? parseDob(v('received_on')) : '' });
+      try { past.dates(input); } catch (e) { errors.push(`${e.message} Write dates as DD/MM/YYYY.`); }
+    } else if (at.received_on >= 0 && v('received_on')) errors.push('Fill "Old sample: registered on" too, or leave "received at lab on" empty.');
+    else if (input.collected_at === 'bad') errors.push('Write the collection date as DD/MM/YYYY.');
     else if (input.collected_at) {
       const day = input.collected_at.slice(0, 10);
       const earliest = new Date(Date.now() - 30 * 86400000 + 330 * 60000).toISOString().slice(0, 10);
@@ -178,7 +188,7 @@ function confirm(db, user, token) {
   if (!good.length) throw new UserError('No rows are ready to register.');
   const out = db.tx(() => good.map((r) => {
     try {
-      const res = samples.register(db, user, r.input);
+      const res = r.input.past_registered ? past.register(db, user, r.input) : samples.register(db, user, r.input);
       if (res.duplicate) throw new UserError(`Same patient and test as ${res.duplicate.sample_id}. Give a repeat reason.`);
       return res.sample.sample_id;
     } catch (e) {

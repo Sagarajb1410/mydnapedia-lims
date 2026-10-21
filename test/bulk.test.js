@@ -111,3 +111,18 @@ test('upload pages and the labels sheet work', async () => {
     assert.equal((labels.match(/class="label"/g) || []).length, 4);
   } finally { server.close(); }
 });
+
+test('staff can upload old samples with their past dates', () => {
+  const { db, admin, sun } = fresh();
+  assert.ok(!bulk.columns(sun).some(([k]) => k === 'registered_on'), 'partners do not get the old-sample columns');
+  const rows = bulk.check(db, admin, filled(db, admin, [
+    row({ full_name: 'Old Upload', mobile: '9822088888', registered_on: '01/03/2026', collected_on: '01/03/2026', received_on: '03/03/2026' }),
+    row({ full_name: 'Bad Old', mobile: '9822099999', registered_on: '05/03/2026', received_on: '01/03/2026' }),
+  ]));
+  assert.equal(rows[0].errors.length, 0, rows[0].errors.join(' '));
+  assert.match(rows[1].errors.join(' '), /before/);
+  const [id] = bulk.confirm(db, admin, bulk.hold(admin, rows)).sampleIds;
+  const s = db.get('SELECT status, received_at FROM samples WHERE sample_id = ?', id);
+  assert.equal(s.status, 'RECEIVED_AT_LAB');
+  assert.equal(s.received_at.slice(0, 10), '2026-03-03');
+});
