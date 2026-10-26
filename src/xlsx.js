@@ -14,15 +14,16 @@ function colName(i) {
   return s;
 }
 
-// Styles: 0 plain, 1 header (bold, honey fill), 2 title (bold, larger), 3 total (bold, top border), 4 note (grey italic).
-const STYLE = { header: 1, title: 2, total: 3, note: 4 };
+// Styles: 0 plain, 1 header (bold, honey fill), 2 title (bold, larger), 3 total (bold, top border), 4 note (grey italic),
+// 5 text (Excel keeps what is typed, so dates and mobile numbers are not reformatted).
+const STYLE = { header: 1, title: 2, total: 3, note: 4, text: 5 };
 const STYLES_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
 <fonts count="4"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="14"/><name val="Calibri"/></font><font><i/><sz val="10"/><color rgb="FF6B7780"/><name val="Calibri"/></font></fonts>
 <fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFF9B300"/><bgColor indexed="64"/></patternFill></fill></fills>
 <borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border><left/><right/><top style="thin"><color auto="1"/></top><bottom/><diagonal/></border></borders>
 <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
-<cellXfs count="5"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/><xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1"/><xf numFmtId="0" fontId="1" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1"/><xf numFmtId="0" fontId="3" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs>
+<cellXfs count="6"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/><xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1"/><xf numFmtId="0" fontId="1" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1"/><xf numFmtId="0" fontId="3" fillId="0" borderId="0" xfId="0" applyFont="1"/><xf numFmtId="49" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/></cellXfs>
 <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
 </styleSheet>`;
 
@@ -37,9 +38,10 @@ function cellXml(cell, ref, rowStyle) {
   return `<c r="${ref}"${sAttr} t="inlineStr"><is><t xml:space="preserve">${esc(c.v)}</t></is></c>`;
 }
 
-// sheet = { name, rows: [{ cells: [...], style } | [...]], widths: [chars...], freezeRow }
+// sheet = { name, rows: [{ cells: [...], style } | [...]], widths: [chars...], freezeRow, textCols }
+// textCols formats every column as text, for sheets people type into.
 function sheetXml(sheet) {
-  const cols = (sheet.widths || []).map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`).join('');
+  const cols = (sheet.widths || []).map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"${sheet.textCols ? ' style="5"' : ''}/>`).join('');
   const rows = sheet.rows.map((r, i) => {
     const row = Array.isArray(r) ? { cells: r } : r;
     const st = STYLE[row.style] || 0;
@@ -100,4 +102,66 @@ function zip(files) {
   return Buffer.concat([...local, cenBuf, end]);
 }
 
-module.exports = { workbook, colName };
+// ---------- Reading ----------
+// Reads the first sheet of an .xlsx file as rows of strings. Handles shared and
+// inline strings and numbers; anything else in the file is ignored.
+function unzip(buf) {
+  let end = buf.length - 22;
+  while (end >= 0 && buf.readUInt32LE(end) !== 0x06054b50) end--;
+  if (end < 0) throw new Error('not a zip');
+  const count = buf.readUInt16LE(end + 10);
+  let p = buf.readUInt32LE(end + 16);
+  const out = new Map();
+  for (let i = 0; i < count; i++) {
+    if (buf.readUInt32LE(p) !== 0x02014b50) throw new Error('bad zip');
+    const method = buf.readUInt16LE(p + 10), size = buf.readUInt32LE(p + 20);
+    const nameLen = buf.readUInt16LE(p + 28), extraLen = buf.readUInt16LE(p + 30), commentLen = buf.readUInt16LE(p + 32);
+    const local = buf.readUInt32LE(p + 42);
+    const name = buf.toString('utf8', p + 46, p + 46 + nameLen);
+    const start = local + 30 + buf.readUInt16LE(local + 26) + buf.readUInt16LE(local + 28);
+    const data = buf.subarray(start, start + size);
+    if (method === 0 || method === 8) out.set(name, () => (method === 8 ? zlib.inflateRawSync(data, { maxOutputLength: 64 * 1024 * 1024 }) : data).toString('utf8'));
+    p += 46 + nameLen + extraLen + commentLen;
+  }
+  return out;
+}
+
+const unesc = (s) => s.replace(/&(lt|gt|quot|apos|amp|#\d+|#x[0-9a-f]+);/gi, (m, e) => ({ lt: '<', gt: '>', quot: '"', apos: "'", amp: '&' }[e.toLowerCase()]
+  ?? String.fromCodePoint(e[1] === 'x' || e[1] === 'X' ? parseInt(e.slice(2), 16) : Number(e.slice(1)))));
+// All the <t> text inside one string item (rich text has several runs).
+const textOf = (xml) => [...xml.matchAll(/<t(?:\s[^>]*)?>([\s\S]*?)<\/t>|<t\/>/g)].map((m) => unesc(m[1] || '')).join('');
+const colIndex = (ref) => [...ref.replace(/\d+$/, '')].reduce((n, ch) => n * 26 + ch.charCodeAt(0) - 64, 0) - 1;
+
+function read(buf) {
+  let files;
+  try { files = unzip(buf); } catch { throw new Error('This file is not an Excel (.xlsx) file.'); }
+  const get = (n) => (files.has(n) ? files.get(n)() : '');
+  const wb = get('xl/workbook.xml');
+  const firstId = (wb.match(/<sheet\b[^>]*\br:id="([^"]+)"/) || [])[1];
+  const rel = firstId && (get('xl/_rels/workbook.xml.rels').match(new RegExp(`<Relationship\\b[^>]*Id="${firstId}"[^>]*>`)) || [])[0];
+  let target = rel ? (rel.match(/Target="([^"]+)"/) || [])[1] : 'worksheets/sheet1.xml';
+  target = target.startsWith('/') ? target.slice(1) : `xl/${target}`;
+  const sheet = get(target);
+  if (!sheet) throw new Error('This file is not an Excel (.xlsx) file.');
+  const shared = [...get('xl/sharedStrings.xml').matchAll(/<si>([\s\S]*?)<\/si>/g)].map((m) => textOf(m[1]));
+  const rows = [];
+  for (const rm of sheet.matchAll(/<row\b([^>]*?)(?:\/>|>([\s\S]*?)<\/row>)/g)) {
+    const rNum = Number((rm[1].match(/\br="(\d+)"/) || [])[1]) || rows.length + 1;
+    const row = [];
+    for (const cm of (rm[2] || '').matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
+      const ref = (cm[1].match(/\br="([A-Z]+\d+)"/) || [])[1];
+      const t = (cm[1].match(/\bt="(\w+)"/) || [])[1];
+      const body = cm[2] || '';
+      const v = (body.match(/<v>([\s\S]*?)<\/v>/) || [])[1];
+      let val = '';
+      if (t === 's') val = shared[Number(v)] ?? '';
+      else if (t === 'inlineStr') val = textOf(body);
+      else if (v != null) val = unesc(v);
+      row[ref ? colIndex(ref) : row.length] = val;
+    }
+    rows[rNum - 1] = Array.from(row, (x) => x ?? '');
+  }
+  return Array.from(rows, (r) => r || []);
+}
+
+module.exports = { workbook, colName, read };

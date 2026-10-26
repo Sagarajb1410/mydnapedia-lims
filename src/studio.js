@@ -19,29 +19,118 @@ const samples = require('./samples');
 const reports = require('./reports');
 const counselling = require('./counselling');
 const form = require('./counselling-form');
+const { patchForm } = require('./studio-form');
+const { scopePlan } = require('./studio-plan');
 const { nowIso, audit, UserError, getSetting } = require('./util');
 
-const STORE_KEY = 'studio/report-studio.html';
-const FILE = path.resolve(__dirname, '..', 'studio', 'report-studio.html');
+// Two copies of the tool: the main one (360 Premium, Fitness, Cardiac) and the
+// Skin Health one, which brands, words and checks skin reports as Skin Health.
+// Samples of a skin test open the Skin Health copy for converting.
+const TOOLS = {
+  main: { key: 'studio/report-studio.html', file: path.resolve(__dirname, '..', 'studio', 'report-studio.html'), label: 'Report Studio' },
+  skin: { key: 'studio/skin-health-studio.html', file: path.resolve(__dirname, '..', 'studio', 'skin-health-studio.html'), label: 'Skin Health Studio' },
+};
 const NAME = 'Report Centre';
 
-// Exact pieces of the tool's code that the LIMS adjusts. If a new version of
-// the tool changes them, linking is switched off and the admin is told.
+// Pieces of the tool's code that the LIMS adjusts so its LIMS tab talks to this
+// LIMS. The tool is minified, so they are found by shape, not by name. If a new
+// version changes them, linking is switched off and the admin is told.
 const LINK_PATCHES = [
-  ['$o=e=>!!(e?.lims?.url&&e?.lims?.key)', '$o=e=>!!(window.__LIMS||e?.lims?.url&&e?.lims?.key)'],
-  ['let r=o2(e.lims.url);if(r)throw new Error(r);', 'let r=window.__LIMS?"":o2(e.lims.url);if(r)throw new Error(r);'],
-  ['fetch(e.lims.url.trim(),', 'fetch((window.__LIMS?window.__LIMS.url:e.lims.url).trim(),'],
-  ['key:e.lims.key.trim()', 'key:(window.__LIMS?window.__LIMS.key:e.lims.key).trim()'],
+  [/([\w$]+)=e=>!!\(e\?\.lims\?\.url&&e\?\.lims\?\.key\)/, (m, f) => `${f}=e=>!!(window.__LIMS||e?.lims?.url&&e?.lims?.key)`],
+  [/let r=([\w$]+)\(e\.lims\.url\);if\(r\)throw new Error\(r\);/, (m, f) => `let r=window.__LIMS?"":${f}(e.lims.url);if(r)throw new Error(r);`],
+  [/fetch\(e\.lims\.url\.trim\(\),/, () => 'fetch((window.__LIMS?window.__LIMS.url:e.lims.url).trim(),'],
+  [/key:e\.lims\.key\.trim\(\)/, () => 'key:(window.__LIMS?window.__LIMS.key:e.lims.key).trim()'],
 ];
 const TERMS_RE = /partnerTerms:\[[^\]]*\]/;
+// The Skin Health copy adds its own partner product names in code.
+const EXTRA_TERMS_RE = /partnerTerms=\[\.\.\.t\.partnerTerms(?:,"[^"]*")*\]/g;
+
+// The main copy reads any partner report as 360 Premium. A skin report (two or
+// more of its section headings) is refused there with a pointer to the Skin
+// Health copy, instead of coming out labelled 360 Premium.
+const SKIN_HEADINGS = /^(Skin Texture and Aging|Skin Damage|Hair Care|Skin Nutrition|Skin Inflammation)$/;
+const ANALYSE_RE = /return\{pages:([\w$]+),fields:([\w$]+),converted:([\w$]+)\}\}/;
+const SKIN_REFUSAL = 'This is a Skin Health report. Convert it in Skin Health Studio: open it from the client\'s Skin Health sample in the LIMS, or use the Skin Health button on the Reports screen.';
+function guardSkin(text) {
+  // Opened on a sample, it hands over to the Skin Health copy, which loads the partner's PDF itself.
+  const handOver = 'if(window.__mdpPlanWin&&window.__LIMS&&window.__LIMS.skin){location.href="/studio?step=plan&tool=skin"+(window.__LIMS.sample?"&sample="+encodeURIComponent(window.__LIMS.sample):"");throw new Error("This is a Skin Health report. Opening the Skin Health action plan window; add the two files there.")}if(window.__LIMS&&window.__LIMS.sample&&window.__LIMS.skin&&!window.__mdpSkinGo){window.__mdpSkinGo=1;location.href="/studio?sample="+encodeURIComponent(window.__LIMS.sample)+"&step=convert&tool=skin";throw new Error("This is a Skin Health report. Opening Skin Health Studio\u2026")}';
+  return text.replace(ANALYSE_RE, (m, pages) => `if(new Set(${pages}.flatMap(x=>(x.body||[]).map(g=>String(g.text||"").trim()).filter(g=>${SKIN_HEADINGS}.test(g)))).size>=2){${handOver}throw new Error(${JSON.stringify(SKIN_REFUSAL)})}${m}`);
+}
+
+// The main copy brands every report "MDP 360 PREMIUM" unless it recognises the
+// layout (only Fitness, by its picture pages). Opened on a sample, the LIMS tells
+// it the sample's test, so Fitness and Cardiac reports carry their own name in
+// the header and foreword. Inserted at the start of the conversion, after the
+// layout check, so the sample's test has the last word.
+const CONVERT_RE = /(function [\w$]+\(e,t,r,n,i=\(\)=>\{\}\)\{let a=\[\],s=\[\],o=[\w$]+\(e\),\{pages:([\w$]+),fields:[\w$]+,converted:([\w$]+)\}=[\w$]+\(o\);(?:t=[\w$]+\(\2,t\);)?)(?=if\(\3\)throw new Error\("This file has already been converted)/;
+// Opened without a sample, the test is chosen on the Convert tab (TEST_PICKER);
+// converting is refused until it is, so a Cardiac report is never labelled 360.
+const USE_PRODUCT = 'if(window.__mdpPick&&!window.__mdpPick.value)throw new Error("Choose the test of this report (360 Premium, Fitness or Cardiac Health) under Partner report, then convert.");'
+  + 'let P=window.__mdpPick?window.__mdpProducts[window.__mdpPick.value]:window.__LIMS&&window.__LIMS.product;'
+  + 'if(P){t=JSON.parse(JSON.stringify(t));t.brand.product=P.brand;t.foreword.text=String(t.foreword.text||"").replace(/360 premium/gi,P.short);if(t.plan)t.plan.tier=P.short}';
+function useProduct(text) {
+  return text.replace(CONVERT_RE, (m) => m + USE_PRODUCT);
+}
+
+// What the main copy should call a sample's report, or null for 360 Premium
+// (its own default) and tests that are not converted from a partner report.
+function productOf(t) {
+  if (!t || t.route !== 'partner_lab' || /360/.test(t.name)) return null;
+  return { brand: t.name.toUpperCase(), short: t.name.replace(/^MDP\s+/i, '') };
+}
+function productFor(db, sampleId) {
+  if (!sampleId) return null;
+  return productOf(db.get('SELECT t.code, t.name, t.route FROM samples s JOIN tests t ON t.id = s.test_id WHERE s.sample_id = ?', sampleId));
+}
+
+// The test choice on the Convert tab when Report Centre is opened without a
+// sample: the partner-lab tests (Skin Health opens its own copy). ?test=CODE
+// picks one in advance.
+function testPicker(db, chosen) {
+  const tests = db.all("SELECT code, name, route FROM tests WHERE route = 'partner_lab' AND active = 1 ORDER BY id");
+  const products = {};
+  for (const t of tests) if (!/skin/i.test(`${t.code} ${t.name}`)) products[t.code] = productOf(t) || 0;
+  const opts = tests.map((t) => `<option value="${/skin/i.test(`${t.code} ${t.name}`) ? 'skin' : t.code}"${t.code === chosen ? ' selected' : ''}>${t.name.replace(/[<&"]/g, '')}</option>`).join('');
+  return `<label id="mdp-test" style="display:block;margin:0 0 10px;font-weight:600">Test of this report <select style="margin-left:6px;padding:4px 6px;border-radius:6px;border:1px solid #d1d5db;font:inherit"><option value="">Choose the test</option>${opts}</select>
+<span style="display:block;font-weight:400;font-size:13px;color:#6b7280">The report is labelled with this test's name. Opened from a sample, this is filled in for you.</span></label>
+<script>window.__mdpProducts=${js(products)};window.__mdpPick=document.querySelector('#mdp-test select');window.__mdpPick.addEventListener('change',function(){if(this.value==='skin')location.href='/studio?tool=skin'});</script>`;
+}
+
+const SKIN_CARE_RE = /(skin:\{id:"skin",[^}]*?)care:!1\}/;
+
+// Lets the LIMS read the tool's case (results and answers) and whether a fresh
+// report has been converted, so a conversion opened from a sample is saved in
+// the LIMS by itself. The action plan is then made later from that saved case,
+// without converting the report again.
+const CASE_RE = /function ([\w$]+)\(\)\{return\{app:"mdp-report-studio-case",[^}]*?clinical:([\w$]+)\.clinical/;
+// The action plan window also opens a case it puts together itself (the
+// counsellor's answers with the results read from the white-labelled report).
+const OPEN_CASE_RE = /function ([\w$]+)\(e\)\{if\(e\.app!=="mdp-report-studio-case"/;
+// The tool reads results only from the partner's original PDF. In the action
+// plan window it also reads them from our own white-labelled report, whose
+// result pages are the partner's pages re-branded.
+const READ_CONVERTED_RE = /clinical:([\w$]+)\|\|!([\w$]+)\.some\(([\w$]+)=>\3\.footer\)\?null:/;
+function exposeCase(text) {
+  return text
+    .replace(CASE_RE, (m, fn, state) => `window.__mdpCase=()=>({json:${fn}(),result:${state}.result,stale:${state}.stale});${m}`)
+    .replace(OPEN_CASE_RE, (m, fn) => `window.__mdpOpenCase=e=>${fn}(e);${m}`)
+    .replace(READ_CONVERTED_RE, (m, conv, pages, pg) => `clinical:(${conv}&&!window.__mdpPlanWin)||!${pages}.some(${pg}=>${pg}.footer)?null:`);
+}
+
+const linkable = (text) => LINK_PATCHES.every(([re]) => re.test(text));
 
 function looksLikeStudio(text) {
   return text.includes('mdp-report-studio') && TERMS_RE.test(text) && text.includes('id="pick"');
 }
 
+// Which copy a file is.
+function toolOf(text) {
+  return /<title>Skin Health Studio<\/title>/.test(text) ? 'skin' : 'main';
+}
+
 // The built-in partner names are taken out before the file is stored.
 function scrub(text) {
-  return text.replace(TERMS_RE, 'partnerTerms:[]');
+  return text.replace(TERMS_RE, 'partnerTerms:[]').replace(EXTRA_TERMS_RE, 'partnerTerms=[...t.partnerTerms]');
 }
 
 function install(db, storage, user, file) {
@@ -49,40 +138,70 @@ function install(db, storage, user, file) {
   const text = file && file.data ? file.data.toString('utf8') : '';
   if (!looksLikeStudio(text)) throw new UserError('That file is not the Report Studio HTML file.');
   const clean = scrub(text);
-  storage.put(STORE_KEY, Buffer.from(clean, 'utf8'));
-  const linked = LINK_PATCHES.every(([from]) => clean.includes(from));
-  audit(db, user.id, 'report_centre_installed', 'settings', null, { size: clean.length, linked });
-  cache = null;
-  return { linked };
+  const tool = toolOf(clean);
+  storage.put(TOOLS[tool].key, Buffer.from(clean, 'utf8'));
+  const linked = linkable(clean);
+  audit(db, user.id, 'report_centre_installed', 'settings', null, { tool, size: clean.length, linked });
+  cache.delete(tool);
+  return { linked, tool: TOOLS[tool].label };
 }
 
-let cache = null; // { source, base, linked, terms }
+const cache = new Map(); // tool -> { raw, terms, text, linked }
 
-function source(storage) {
-  if (storage.exists(STORE_KEY)) return { from: 'installed', text: storage.get(STORE_KEY).toString('utf8') };
-  if (fs.existsSync(FILE)) return { from: 'bundled', text: scrub(fs.readFileSync(FILE, 'utf8')) };
+function source(storage, tool = 'main') {
+  const t = TOOLS[tool];
+  if (storage.exists(t.key)) return { from: 'installed', text: storage.get(t.key).toString('utf8') };
+  if (fs.existsSync(t.file)) return { from: 'bundled', text: scrub(fs.readFileSync(t.file, 'utf8')) };
   return null;
 }
 
+// { main: {...}, skin: {...} }, each { installed, from, linked, label }.
 function status(storage) {
-  const s = source(storage);
-  if (!s) return { installed: false };
-  return { installed: true, from: s.from, linked: LINK_PATCHES.every(([from]) => s.text.includes(from)) };
+  const out = {};
+  for (const tool of Object.keys(TOOLS)) {
+    const s = source(storage, tool);
+    out[tool] = s ? { installed: true, from: s.from, linked: linkable(s.text), label: TOOLS[tool].label } : { installed: false, label: TOOLS[tool].label };
+  }
+  return out;
 }
 
 const js = (v) => JSON.stringify(v).replace(/</g, '\\u003c');
 
-function base(db, storage) {
+function base(db, storage, tool = 'main') {
   const terms = reports.leakTerms(db);
-  const s = source(storage);
+  const s = source(storage, tool);
   if (!s) return null;
-  if (cache && cache.raw === s.text && cache.terms === terms.join('|')) return cache;
+  const hit = cache.get(tool);
+  if (hit && hit.raw === s.text && hit.terms === terms.join('|')) return hit;
   let text = s.text.replace(TERMS_RE, `partnerTerms:${js(terms)}`);
-  const linked = LINK_PATCHES.every(([from]) => text.includes(from));
-  if (linked) for (const [from, to] of LINK_PATCHES) text = text.replace(from, () => to);
-  text = text.replace(/Report Studio/g, NAME);
-  cache = { raw: s.text, terms: terms.join('|'), text, linked };
-  return cache;
+  const linked = linkable(text);
+  if (linked) for (const [re, to] of LINK_PATCHES) text = text.replace(re, to);
+  // Reads counselling forms whose layout was changed in Word (see studio-form.js).
+  text = patchForm(text);
+  // Each action plan fits its own test (see studio-plan.js).
+  text = exposeCase(scopePlan(text));
+  if (tool === 'main') text = useProduct(guardSkin(text));
+  // The Skin Health copy was made without the counselling form and action plan
+  // tabs. Every test gets an action plan, so they are switched on.
+  if (tool === 'skin') text = text.replace(SKIN_CARE_RE, '$1care:!0}');
+  text = text.replace(/Report Studio/g, NAME).replace(/<title>Skin Health Studio<\/title>/, `<title>${NAME} · Skin Health</title>`);
+  const out = { raw: s.text, terms: terms.join('|'), text, linked };
+  cache.set(tool, out);
+  return out;
+}
+
+// The copy to open: the Skin Health one for a skin test's sample (converting,
+// counselling form and action plan alike), when it is installed; the main one
+// otherwise.
+const isSkinTest = (db, sampleId) => {
+  const t = db.get('SELECT t.code, t.name FROM samples s JOIN tests t ON t.id = s.test_id WHERE s.sample_id = ?', sampleId);
+  return Boolean(t && /skin/i.test(`${t.code} ${t.name}`));
+};
+
+function toolFor(db, storage, user, sampleId, step, asked) {
+  if (asked === 'skin' && source(storage, 'skin')) return 'skin';
+  if (!sampleId) return 'main';
+  return isSkinTest(db, sampleId) && source(storage, 'skin') ? 'skin' : 'main';
 }
 
 // A sign-in key for the tool, valid as long as a normal sign-in.
@@ -93,16 +212,45 @@ function keyFor(db, user) {
   return token;
 }
 
+// Whether the case saved for a sample already holds the converted results.
+function hasResults(db, storage, user, sampleId) {
+  if (!sampleId) return false;
+  try {
+    const s = samples.load(db, user, sampleId);
+    const saved = db.get("SELECT file_key FROM studio_docs WHERE sample_pk = ? AND kind = 'case' ORDER BY id DESC LIMIT 1", s.id);
+    return Boolean(saved && JSON.parse(storage.get(saved.file_key).toString('utf8')).clinical);
+  } catch { return false; }
+}
+
 // The page for one person, optionally opened on one sample.
-function page(db, storage, user, { sample, step } = {}) {
-  const b = base(db, storage);
+function page(db, storage, user, { sample, step, tool, test } = {}) {
+  const toolName = toolFor(db, storage, user, sample, step, tool);
+  const b = base(db, storage, toolName);
   if (!b) return null;
   const head = b.linked
-    ? `<script>window.__LIMS=${js({ url: '/studio/api', key: keyFor(db, user), sample: sample || '', step: step || '', role: user.role })};</script>`
+    ? `<script>window.__LIMS=${js({ url: '/studio/api', key: keyFor(db, user), sample: sample || '', step: step || '', role: user.role, planWindow: step === 'plan', tool: toolName, results: hasResults(db, storage, user, sample), product: productFor(db, sample), skin: Boolean(source(storage, 'skin')) })};</script>`
     : '';
-  const tail = b.linked && sample ? `<script>${OPENER}</script>` : '';
-  return b.text.replace('<head>', () => `<head>${head}`).replace('</body>', () => `${tail}</body>`);
+  const planWin = b.linked && step === 'plan';
+  const tail = (planWin ? PLAN_WINDOW : '') + (b.linked && (sample || planWin) ? `<script>${OPENER}</script>` : '');
+  let text = b.text.replace('<head>', () => `<head>${head}`).replace('</body>', () => `${tail}</body>`);
+  if (toolName === 'main' && !sample && step !== 'plan') text = text.replace('<h2>Partner report</h2>', () => `<h2>Partner report</h2>${testPicker(db, test)}`);
+  return text;
 }
+
+// The action plan window: the white-labelled report and the counselling form
+// side by side with the plan. Converting and the invite email stay in the full
+// Report Centre; here only the form, the plan and the LIMS tabs are shown.
+const PLAN_WINDOW = `<style>[role=tab][data-tab=convert],[role=tab][data-tab=email],[role=tab][data-tab=spelling],[role=tab][data-tab=settings]{display:none!important}
+#mdp-plan{padding:16px 20px;background:#fffaf0;border-bottom:1px solid #f1d9a0;font:14px/1.45 Montserrat,system-ui,sans-serif;color:#1f2937}
+.mdp-head b{font-size:18px;margin-right:10px}.mdp-head span{color:#6b7280}
+.mdp-steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin-top:12px}
+.mdp-step{display:flex;gap:10px;align-items:center;background:#fff;border:1px solid #eee2c4;border-radius:10px;padding:12px}.mdp-step>div{flex:1;min-width:0}
+.mdp-n{flex:none;width:26px;height:26px;border-radius:50%;background:#f9b300;color:#1f2937;font-weight:700;display:grid;place-items:center}
+#mdp-plan .st{font-size:13px;color:#6b7280;overflow-wrap:anywhere}#mdp-plan .st.ok{color:#15803d}#mdp-plan .st.bad{color:#b91c1c}
+.mdp-btn,#mdp-make{flex:none;cursor:pointer;padding:7px 14px;border-radius:8px;border:1px solid #d1d5db;background:#fff;font:600 13px Montserrat,system-ui,sans-serif;color:#1f2937}
+#mdp-make{background:#f9b300;border-color:#f9b300}.mdp-btn input{display:none}#mdp-tier{margin-top:4px;padding:4px 6px;border-radius:6px;border:1px solid #d1d5db}
+#mdp-msg{margin-top:10px;font-size:14px}</style>
+<script>window.__mdpPlanWin=true;document.title='Action plan'+(window.__LIMS&&window.__LIMS.sample?' · '+window.__LIMS.sample:'');</script>`;
 
 // Runs inside the tool when it is opened on a sample: loads the partner's PDF
 // (for lab staff) and the client's details or saved case from the LIMS, so
@@ -119,15 +267,87 @@ async function loadPdf(){
   var dt=new DataTransfer();dt.items.add(new File([blob],name,{type:'application/pdf'}));
   var pick=$('#pick');pick.files=dt.files;pick.dispatchEvent(new Event('change',{bubbles:true}));await pause(3000);return true;
 }
+function note(text,good){var n=document.getElementById('mdp-note');if(!n){n=document.createElement('div');n.id='mdp-note';n.style.cssText='position:fixed;right:16px;bottom:16px;max-width:380px;z-index:9999;padding:10px 14px;border-radius:8px;font:14px/1.4 system-ui,sans-serif;box-shadow:0 4px 16px rgba(0,0,0,.2)';document.body.appendChild(n)}n.style.background=good?'#e7f6ec':'#fff4e0';n.style.color=good?'#14532d':'#7c2d12';n.textContent=text;if(good)setTimeout(function(){n.remove()},8000)}
+// Each new conversion is saved in the LIMS as the sample's case.
+function keepCase(){var last=null;setInterval(async function(){
+  if(!window.__mdpCase)return;var c=window.__mdpCase();if(!c.result||c.stale||c.result===last||!c.json.clinical)return;last=c.result;
+  try{var bytes=new TextEncoder().encode(JSON.stringify(c.json)),bin='';for(var i=0;i<bytes.length;i+=8192)bin+=String.fromCharCode.apply(null,bytes.subarray(i,i+8192));
+    var r=await(await fetch(L.url,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify({action:'push',sampleId:L.sample,kind:'case',name:L.sample+'_case.json',mime:'application/json',b64:btoa(bin),key:L.key})})).json();
+    if(!r.ok)throw new Error(r.error||'refused');note('Saved in the LIMS. The action plan can be made later without converting again.',true);
+  }catch(e){last=null;console.warn('Report Centre: could not save the case',e)}},3000)}
+// The action plan window: one screen where the white-labelled report and the
+// counsellor's filled form go in and the action plan comes out. Opened on a
+// sample, both are filled in from the LIMS when it has them.
+function say(id,text,ok){var r=$(id);if(r){r.textContent=text;r.className='st'+(ok===true?' ok':ok===false?' bad':'')}}
+function answers(f){var n=0;if(!f)return 0;for(var k in f){var v=f[k];if(k==='life'){for(var j in v)if(v[j])n++}else if(Array.isArray(v)?v.length:v)n++}return n}
+function current(){return window.__mdpCase?window.__mdpCase().json:null}
+function panel(){document.title='Action plan'+(L.sample?' · '+L.sample:'');var d=document.createElement('div');d.id='mdp-plan';var t=L.product?L.product.short:(L.tool==='skin'?'Skin Health':'360 Premium');
+  d.innerHTML='<div class="mdp-head"><b>Action plan</b><span>Add the white-labelled report and the counsellor’s filled form, then create the plan.</span></div>'
+  +'<div class="mdp-steps"><div class="mdp-step"><span class="mdp-n">1</span><div><b>White-labelled report (PDF)</b><div id="mdp-rep" class="st">Not added yet</div></div><label class="mdp-btn">Choose PDF<input type="file" id="mdp-pick" accept="application/pdf,.pdf"></label></div>'
+  +'<div class="mdp-step"><span class="mdp-n">2</span><div><b>Counsellor’s filled form (Word or PDF)</b><div id="mdp-frm" class="st">Not added yet</div></div><label class="mdp-btn">Choose file<input type="file" id="mdp-form" accept=".docx,.pdf,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"></label></div>'
+  +'<div class="mdp-step"><span class="mdp-n">3</span><div><b>Test</b><div class="st"><select id="mdp-tier">'+['360 Premium','Fitness','Cardiac Health','Skin Health'].map(function(x){return '<option'+(x===t?' selected':'')+'>'+x+'</option>'}).join('')+'</select></div></div><button type="button" id="mdp-make">Create action plan</button></div></div>'
+  +'<div id="mdp-msg" class="st"></div>';
+  document.body.insertBefore(d,document.body.firstChild);
+  var lbl=document.querySelector('[role=tab][data-tab="form"]');if(lbl)lbl.textContent='Check answers';
+  $('#mdp-pick').addEventListener('change',function(){var f=this.files[0];this.value='';if(f)useReport(f,f.name)});
+  $('#mdp-form').addEventListener('change',function(){var f=this.files[0];this.value='';if(f)useForm(f)});
+  $('#mdp-tier').addEventListener('change',function(){var v=this.value;if((v==='Skin Health')!==(L.tool==='skin')){location.href='/studio?step=plan'+(v==='Skin Health'?'&tool=skin':'')+(L.sample?'&sample='+encodeURIComponent(L.sample):'')}});
+  $('#mdp-make').addEventListener('click',make);}
+async function useReport(blob,name){
+  var keep=current();say('#mdp-rep','Reading '+name+'…');
+  var w=$('#tplWarn');if(w)w.hidden=true;
+  var dt=new DataTransfer();dt.items.add(new File([blob],name,{type:'application/pdf'}));var pick=$('#pick');pick.files=dt.files;pick.dispatchEvent(new Event('change',{bubbles:true}));
+  try{await wait(function(){var w=$('#tplWarn');return (w&&!w.hidden)||!$('#details')||!$('#details').hidden},30000)}catch(e){}
+  await pause(300);
+  var got=current(),rows=got&&got.clinical&&got.clinical.rows?got.clinical.rows.length:0;
+  if(!rows){if(keep&&keep.patient&&keep.patient.name)window.__mdpOpenCase(keep);say('#mdp-rep',name+': no results could be read. Use the PDF made by Report Centre, not a scan or a picture-only file.',false);return false}
+  var c=keep&&keep.patient&&keep.patient.name?keep:got,p=Object.assign({},c.patient||{});
+  for(var k in got.patient||{})if(!p[k]&&got.patient[k])p[k]=got.patient[k];
+  window.__mdpOpenCase(Object.assign({},c,{patient:p,clinical:got.clinical}));say('#mdp-msg','');
+  say('#mdp-rep',name+' ✓ '+rows+' result'+(rows>1?'s':'')+' read'+(p.name?' for '+p.name:''),true);return true;
+}
+async function useForm(file){
+  say('#mdp-frm','Reading '+file.name+'…');
+  try{var res=await window.__mdpReadForm(new Uint8Array(await file.arrayBuffer()))}catch(e){say('#mdp-frm',file.name+': '+String(e.message||e),false);return false}
+  if(!res.answered){say('#mdp-frm',file.name+': this copy of the form has no answers yet.',false);return false}
+  var cur=current(),p=Object.assign({},cur.patient||{}),q=res.patient||{},norm=function(x){return String(x||'').toUpperCase().replace(/[^A-Z0-9]/g,'')};
+  if(q.sampleId&&p.sampleId&&norm(q.sampleId)!==norm(p.sampleId)){say('#mdp-frm',file.name+' is for sample '+q.sampleId+', but the report is for '+p.sampleId+'. Not used.',false);return false}
+  for(var k in q)if(!p[k]&&q[k])p[k]=q[k];
+  window.__mdpOpenCase(Object.assign({},cur,{patient:p,form:res.form}));say('#mdp-msg','');
+  say('#mdp-frm',file.name+' ✓ '+res.answered+' answers read'+(res.unmatched&&res.unmatched.length?' ('+res.unmatched.length+' to check on the Check answers tab)':''),true);return true;
+}
+function make(){
+  var c=current(),rows=c&&c.clinical&&c.clinical.rows?c.clinical.rows.length:0;
+  if(!rows)return say('#mdp-msg','Add the white-labelled report first (step 1).',false);
+  if(!answers(c.form))return say('#mdp-msg','Add the counsellor’s filled form first (step 2).',false);
+  if(!c.patient||!c.patient.age)return say('#mdp-msg','The client’s age is missing. Add it on the Check answers tab, or use the form with the patient details filled in.',false);
+  window.__mdpOpenCase(Object.assign({},c,{plan:Object.assign({},c.plan||{},{tier:$('#mdp-tier').value})}));
+  tab('plan');say('#mdp-msg','Action plan created below. Download it as Word or PDF'+(L.sample?', or send it to the LIMS on the LIMS tab.':'.'),true);
+}
+async function planWindow(){
+  panel();
+  if(L.sample){
+    tab('lims');var id=await wait(function(){return $('#l-id')},5000);id.value=L.sample;
+    $('#l-find').click();await wait(function(){var f=$('#l-found');return f&&!f.hidden},15000);
+    var c=$('#l-case');if(c&&!c.hidden){c.click();await pause(300);if(c.dataset.armed)c.click();await pause(1500);}else $('#l-use').click();
+    var n=answers((current()||{}).form);if(n)say('#mdp-frm','✓ '+n+' answers from the LIMS. Choose a file to use another copy.',true);
+    var r=await fetch('/studio/branded/'+encodeURIComponent(L.sample),{credentials:'same-origin'});
+    if(r.ok)await useReport(await r.blob(),decodeURIComponent(r.headers.get('X-File-Name')||'report.pdf'));
+    else if((current()||{}).clinical)say('#mdp-rep','✓ Results saved in the LIMS at conversion. Choose a PDF to use another copy.',true);
+  }
+  tab('form');
+}
 async function run(){
   await wait(function(){var b=$('#boot');return !b||b.hidden||getComputedStyle(b).display==='none'},60000);
+  if(L.planWindow){await planWindow();return;}
   if(L.step==='convert')await loadPdf();
   tab('lims');var id=await wait(function(){return $('#l-id')},5000);id.value=L.sample;
   $('#l-find').click();await wait(function(){var f=$('#l-found');return f&&!f.hidden},15000);
-  if(L.step==='convert'){$('#l-use').click();tab('convert');return;}
+  if(L.step==='convert'){$('#l-use').click();tab('convert');keepCase();return;}
   var c=$('#l-case');if(c&&!c.hidden){c.click();await pause(300);if(c.dataset.armed)c.click();await pause(1500);}
   else $('#l-use').click();
-  if(await loadPdf()&&/No client open/.test(($('#caseName')||{}).textContent||'')&&c&&!c.hidden){
+  // The saved case already has the results: no need to read the partner's PDF again.
+  if(!L.results&&await loadPdf()&&/No client open/.test(($('#caseName')||{}).textContent||'')&&c&&!c.hidden){
     tab('lims');c.click();await pause(300);if(c.dataset.armed)c.click();await pause(1500);
   }
   tab(L.step==='plan'?'plan':'form');
@@ -150,12 +370,33 @@ function docs(db, samplePk) {
   return db.all('SELECT * FROM studio_docs WHERE sample_pk = ? ORDER BY id DESC', samplePk);
 }
 
-// The latest case saved from the tool, else one built from the LIMS form.
+// The latest case saved from the tool (results and answers), else one built
+// from the LIMS form. When the counsellor filled in or changed the LIMS form
+// after the case was saved, their answers replace the saved ones, so the action
+// plan can be made without converting the report again.
 function caseFor(db, storage, user, s) {
   const saved = db.get("SELECT * FROM studio_docs WHERE sample_pk = ? AND kind = 'case' ORDER BY id DESC LIMIT 1", s.id);
-  if (saved) return storage.get(saved.file_key).toString('utf8');
-  if (['admin', 'counsellor'].includes(user.role) && counselling.STAGES.includes(s.status)) return JSON.stringify(counselling.caseFile(db, user, s.sample_id));
-  return null;
+  const counsellingRole = ['admin', 'counsellor'].includes(user.role);
+  if (!saved) return counsellingRole && counselling.STAGES.includes(s.status) ? JSON.stringify(counselling.caseFile(db, user, s.sample_id)) : null;
+  const json = storage.get(saved.file_key).toString('utf8');
+  const lims = counsellingRole ? counselling.loadForm(db, s.id) : null;
+  if (!lims || !counselling.STAGES.includes(s.status)) return json;
+  let c;
+  try { c = JSON.parse(json); } catch { return json; }
+  // A case saved at conversion carries no answers yet, so the LIMS form fills it whenever it was saved.
+  const noAnswers = !c.form || !form.FIELDS.some((f) => { const v = form.get(c.form, f.key); return v != null && v !== '' && !(Array.isArray(v) && !v.length); });
+  if (lims.updated_at <= saved.uploaded_at && !noAnswers) return json;
+  const fresh = counselling.caseFile(db, user, s.sample_id);
+  const merged = { ...(c.form || {}), life: { ...((c.form || {}).life || {}) } };
+  for (const f of form.FIELDS) {
+    const v = form.get(fresh.form, f.key);
+    if (v == null || v === '' || (Array.isArray(v) && !v.length)) continue;
+    const [a, b] = f.key.split('.');
+    if (b) merged[a] = { ...(merged[a] || {}), [b]: v }; else merged[a] = v;
+  }
+  if (fresh.form.counsellor) merged.counsellor = fresh.form.counsellor;
+  if (fresh.form.sessionDate) merged.sessionDate = fresh.form.sessionDate;
+  return JSON.stringify({ ...c, form: merged, mail: { ...(c.mail || {}), ...Object.fromEntries(Object.entries(fresh.mail).filter(([, v]) => v)) } });
 }
 
 function saveDoc(db, storage, user, s, kind, name, mime, data) {
@@ -200,13 +441,17 @@ function api(db, storage, req) {
   if (req.action === 'find') {
     const files = [...reports.forSample(db, s.id).map((r) => r.file_name), ...counselling.plansFor(db, s.id).map((r) => r.file_name), ...docs(db, s.id).map((d) => d.file_name)];
     return {
-      sample: { sampleId: s.sample_id, name: p.full_name, gender: p.gender, age: ageOf(p.dob), dob: p.dob, phone: p.mobile, email: p.email || '', address: p.address || '', city: [p.city, p.state, p.pincode].filter(Boolean).join(', '), files },
+      sample: { sampleId: s.sample_id, name: p.full_name, gender: p.gender, age: p.dob ? ageOf(p.dob) : String(samples.patientAge(p) ?? ''), dob: p.dob || '', phone: p.mobile || '', email: p.email || '', address: p.address || '', city: [p.city, p.state, p.pincode].filter(Boolean).join(', '), files },
       stage: samples.STATUSES[s.status],
       hasCase: Boolean(caseFor(db, storage, user, s)),
     };
   }
   if (req.action === 'loadCase') {
-    const json = caseFor(db, storage, user, s);
+    let json = caseFor(db, storage, user, s);
+    // The Skin Health copy only opens cases marked as skin.
+    if (json && isSkinTest(db, s.sample_id)) {
+      try { json = JSON.stringify({ ...JSON.parse(json), product: 'skin' }); } catch { /* leave it as stored */ }
+    }
     return json ? { found: true, json } : { found: false };
   }
   if (req.action === 'push') {
@@ -218,9 +463,9 @@ function api(db, storage, req) {
     switch (req.kind) {
       case 'report':
         r = reports.uploadBranded(db, storage, user, s.sample_id, file);
-        if (!r.check.ok) throw new UserError(`Blocked by the LIMS check: ${r.check.problems.join(' ')}`);
+        if (!r.check.ok && !r.check.pictureOnly) throw new UserError(`Blocked by the LIMS check: ${r.check.problems.join(' ')}`);
         audit(db, user.id, 'report_centre_push', 'sample', s.sample_id, { kind: 'report', version: r.version });
-        return { status: true, stage: stage(), skipped: `Stored as v${r.version}. It passed the check and waits for the admin's approval in the LIMS` };
+        return { status: true, stage: stage(), skipped: `Stored as v${r.version}. ${r.check.ok ? 'It passed the check' : 'It is pictures only, so the admin checks it by eye,'} and waits for the admin's approval in the LIMS` };
       case 'partner_report':
         r = reports.uploadSource(db, storage, user, s.sample_id, file);
         return { status: true, stage: stage() };
@@ -243,4 +488,4 @@ function api(db, storage, req) {
   throw new UserError('Unknown request.');
 }
 
-module.exports = { install, status, page, api, docs, scrub, looksLikeStudio, NAME, LINK_PATCHES };
+module.exports = { install, status, page, api, docs, scrub, looksLikeStudio, toolOf, guardSkin, useProduct, NAME, LINK_PATCHES, TOOLS };

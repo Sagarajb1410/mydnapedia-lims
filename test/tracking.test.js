@@ -4,6 +4,7 @@ const db_ = require('../src/db');
 const seed = require('../src/seed');
 const samples = require('../src/samples');
 const tracking = require('../src/tracking');
+const receipts = require('../src/receipts');
 const { istDate } = require('../src/util');
 
 function fresh() {
@@ -119,4 +120,95 @@ test('the partner lab is never named in code-facing text', () => {
   const dir = path.join(__dirname, '..', 'src');
   const files = fs.readdirSync(dir, { recursive: true }).filter((f) => f.endsWith('.js'));
   for (const f of files) assert.ok(!/\bMMG\b/i.test(fs.readFileSync(path.join(dir, f), 'utf8')), f);
+});
+
+test('receipt acknowledgement lists the day\'s accepted and rejected samples for the partner', () => {
+  const { db, lab, sun, user, reg } = fresh();
+  const a = reg(sun, 'MDPFIT', { collected_now: 'yes', collector: 'Raj' });
+  const b = reg(sun, 'MDPSKIN', { collected_now: 'yes', collector: 'Raj' });
+  tracking.receive(db, lab, a.sample_id, { condition: 'Acceptable' });
+  tracking.receive(db, lab, b.sample_id, { condition: 'Leaked' });
+  const day = istDate();
+  const ack = receipts.forDay(db, sun, sun.account_id, day);
+  assert.match(ack.number, /^ACK-.+-\d{8}$/);
+  const mine = ack.rows.filter((r) => [a.sample_id, b.sample_id].includes(r.sample_id));
+  assert.equal(mine.length, 2);
+  assert.ok(mine.find((r) => r.sample_id === a.sample_id).accepted);
+  assert.match(mine.find((r) => r.sample_id === b.sample_id).reject_reason, /Leaked/);
+  assert.ok(mine.every((r) => r.received_by), 'who received it is shown');
+  assert.ok(receipts.list(db, sun).some((r) => r.day === day && r.account.id === sun.account_id));
+  assert.throws(() => receipts.forDay(db, user('carewell@demo.example'), sun.account_id, day), /not found/);
+  assert.throws(() => receipts.forDay(db, sun, sun.account_id, '1999-01-01'), /Nothing was received/);
+  const mail = db.get("SELECT body FROM notifications WHERE code = 'N8' AND channel = 'email' AND account_id = ? AND body LIKE ?", sun.account_id, `%${a.sample_id}%`);
+  assert.match(mail.body, new RegExp(`/receipts/${sun.account_id}/${day}`));
+});
+
+test('one-click steps from the Samples list: collected, courier, reached lab', () => {
+  const quick = require('../src/quick');
+  const { db, admin, lab, sun, reg } = fresh();
+  const a = reg(sun, 'MDPFIT');
+  const b = reg(sun, 'MDPSKIN');
+  const row = (s) => db.get('SELECT s.*, a.type AS account_type FROM samples s JOIN accounts a ON a.id = s.account_id WHERE s.id = ?', s.id);
+  assert.equal(quick.nextStep(sun, row(a)), 'collect');
+  assert.deepEqual(quick.run(db, sun, 'collect', [a.sample_id, b.sample_id]).done.length, 2);
+  assert.equal(quick.nextStep(admin, row(a)), 'courier');
+  assert.equal(quick.nextStep(lab, row(a)), 'receive');
+  assert.throws(() => quick.run(db, lab, 'courier', [a.sample_id]), /admin/);
+  const c = quick.run(db, admin, 'courier', [a.sample_id, b.sample_id]);
+  assert.equal(c.done.length, 2);
+  assert.equal(c.messages.length, 1, 'one courier message for one location');
+  assert.match(quick.openMessage(db, admin, c.messages[0]), /^https:\/\/wa\.me\//);
+  assert.equal(db.get('SELECT status FROM notifications WHERE id = ?', c.messages[0]).status, 'sent');
+  const r = quick.run(db, lab, 'receive', [a.sample_id, b.sample_id, 'NOPE']);
+  assert.equal(r.done.length, 2);
+  assert.equal(r.skipped.length, 1);
+  assert.equal(status(db, a), 'RECEIVED_AT_LAB');
+  assert.ok(['9 am to 12 noon', '12 noon to 3 pm', '3 pm to 6 pm'].includes(quick.nextPickup().window));
+});
+
+test('an old sample is registered, collected and received with its past dates and no messages', () => {
+  const past = require('../src/past');
+  const { db, admin, lab, sun } = fresh();
+  const t = String(db.get("SELECT id FROM tests WHERE code = 'MDPFIT'").id);
+  const p = { full_name: 'Old Case', gender: 'Male', age_years: '50', mobile: '9822012345', test_id: t };
+  assert.throws(() => past.register(db, sun, { ...p, past_registered: '2026-03-01' }), /staff/);
+  assert.throws(() => past.register(db, lab, { ...p, past_registered: '2026-03-05', past_received: '2026-03-01' }), /before/);
+  const { sample } = past.register(db, admin, { ...p, direct: { paymentMode: 'Cash' }, past_registered: '2026-03-01', past_collected: '2026-03-01', past_received: '2026-03-03' });
+  const s = db.get('SELECT * FROM samples WHERE id = ?', sample.id);
+  assert.equal(s.status, 'RECEIVED_AT_LAB');
+  assert.equal(istDate(new Date(s.registered_at)), '2026-03-01');
+  assert.equal(istDate(new Date(s.received_at)), '2026-03-03');
+  assert.equal((new Date(s.tat_due_at) - new Date(s.received_at)) / 86400000, 21);
+  const ev = db.all('SELECT to_status, at FROM sample_events WHERE sample_pk = ? ORDER BY id', s.id).map((e) => `${e.to_status} ${istDate(new Date(e.at))}`);
+  assert.deepEqual(ev, ['REGISTERED 2026-03-01', 'COLLECTED 2026-03-01', 'RECEIVED_AT_LAB 2026-03-03']);
+  assert.equal(db.get("SELECT count(*) n FROM notifications WHERE sample_pk = ? AND status = 'pending'", s.id).n, 0);
+  assert.equal(istDate(new Date(db.get('SELECT created_at FROM bills WHERE sample_pk = ?', s.id).created_at)), '2026-03-01');
+});
+
+test('next step follows the sample all the way and the lab steps work in one click', () => {
+  const quick = require('../src/quick');
+  const { db, admin, lab, sun, reg, user } = fresh();
+  const counsellor = user('counsellor@demo.example');
+  const s = reg(sun, 'MDPFIT', { collected_now: 'yes', collector: 'Raj' });
+  quick.run(db, lab, 'receive', [s.sample_id]);
+  const row = () => db.get('SELECT s.*, t.route, a.type AS account_type FROM samples s JOIN tests t ON t.id = s.test_id JOIN accounts a ON a.id = s.account_id WHERE s.id = ?', s.id);
+  assert.equal(quick.nextStep(lab, row()), 'onward');
+  const o = quick.run(db, lab, 'onward', [s.sample_id]);
+  assert.equal(o.done.length, 1);
+  assert.equal(o.messages.length, 1);
+  assert.equal(quick.nextStep(lab, row()), 'partner_received');
+  quick.run(db, lab, 'partner_received', [s.sample_id]);
+  assert.equal(status(db, s), 'RECEIVED_AT_PARTNER');
+  assert.equal(quick.nextStep(lab, row()), 'upload_result');
+  assert.match(quick.stepHref('upload_result', s.sample_id), /#report$/);
+  const map = (st) => quick.nextStep(admin, { status: st, route: 'partner_lab', account_type: 'partner' });
+  assert.deepEqual(['PARTNER_REPORT_RECEIVED', 'REPORT_WHITE_LABELLED', 'REPORT_APPROVED', 'REPORT_RELEASED', 'COUNSELLING_SCHEDULED', 'COUNSELLING_DONE', 'ACTION_PLAN_DRAFTED', 'ACTION_PLAN_APPROVED'].map(map),
+    ['white_label', 'approve', 'release', 'book', 'session', 'plan', 'approve_plan', 'deliver']);
+  assert.equal(quick.nextStep(counsellor, { status: 'REPORT_RELEASED' }), 'book');
+  assert.equal(quick.nextStep(lab, { status: 'REPORT_RELEASED' }), null);
+  assert.equal(quick.nextStep(sun, { status: 'RECEIVED_AT_LAB' }), null);
+  const ih = reg(lab, 'DEMOIH', { direct: { paymentMode: 'Cash' }, collected_now: 'yes', collector: 'Lab' });
+  quick.run(db, lab, 'receive', [ih.sample_id]);
+  assert.equal(quick.run(db, lab, 'in_house', [ih.sample_id]).done.length, 1);
+  assert.equal(status(db, ih), 'IN_HOUSE_PROCESSING');
 });
