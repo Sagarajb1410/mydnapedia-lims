@@ -77,7 +77,7 @@ ${rows.map((r) => {
   })}
 ${rows.length ? '' : html`<tr><td colspan="5" class="muted">${empty}</td></tr>`}</table></div>`;
     const step = (n, title, text) => html`<div class="kpi"><span class="k">Step ${n}</span><b style="font-size:16px;margin-top:6px">${title}</b><small>${text}</small></div>`;
-    h.send(ctx, 'Reports', html`${centreHead(ctx.user, '/reports', 'Partner report to a checked, approved MyDNAPedia report, then counselling and the action plan.')}
+    h.send(ctx, 'Reports', html`${centreHead(ctx.user, '/reports', 'Partner report to a checked, approved MyDNAPedia report, then counselling and the action plan.', db)}
 <div class="kpis">${step(1, 'Partner report in', 'Upload the PDF the partner lab sent, on the sample page.')}
 ${step(2, 'Convert', `Open the sample in Report Centre. It loads the partner PDF and the client's details for you.`)}
 ${step(3, 'Send to the LIMS', 'On the LIMS tab in Report Centre, send the report. The LIMS blocks any partner name.')}

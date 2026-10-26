@@ -63,18 +63,37 @@ function guardSkin(text) {
 // the header and foreword. Inserted at the start of the conversion, after the
 // layout check, so the sample's test has the last word.
 const CONVERT_RE = /(function [\w$]+\(e,t,r,n,i=\(\)=>\{\}\)\{let a=\[\],s=\[\],o=[\w$]+\(e\),\{pages:([\w$]+),fields:[\w$]+,converted:([\w$]+)\}=[\w$]+\(o\);(?:t=[\w$]+\(\2,t\);)?)(?=if\(\3\)throw new Error\("This file has already been converted)/;
-const USE_PRODUCT = 'if(window.__LIMS&&window.__LIMS.product){let P=window.__LIMS.product;t=JSON.parse(JSON.stringify(t));t.brand.product=P.brand;t.foreword.text=String(t.foreword.text||"").replace(/360 premium/gi,P.short);if(t.plan)t.plan.tier=P.short}';
+// Opened without a sample, the test is chosen on the Convert tab (TEST_PICKER);
+// converting is refused until it is, so a Cardiac report is never labelled 360.
+const USE_PRODUCT = 'if(window.__mdpPick&&!window.__mdpPick.value)throw new Error("Choose the test of this report (360 Premium, Fitness or Cardiac Health) under Partner report, then convert.");'
+  + 'let P=window.__mdpPick?window.__mdpProducts[window.__mdpPick.value]:window.__LIMS&&window.__LIMS.product;'
+  + 'if(P){t=JSON.parse(JSON.stringify(t));t.brand.product=P.brand;t.foreword.text=String(t.foreword.text||"").replace(/360 premium/gi,P.short);if(t.plan)t.plan.tier=P.short}';
 function useProduct(text) {
   return text.replace(CONVERT_RE, (m) => m + USE_PRODUCT);
 }
 
 // What the main copy should call a sample's report, or null for 360 Premium
 // (its own default) and tests that are not converted from a partner report.
-function productFor(db, sampleId) {
-  if (!sampleId) return null;
-  const t = db.get('SELECT t.code, t.name, t.route FROM samples s JOIN tests t ON t.id = s.test_id WHERE s.sample_id = ?', sampleId);
+function productOf(t) {
   if (!t || t.route !== 'partner_lab' || /360/.test(t.name)) return null;
   return { brand: t.name.toUpperCase(), short: t.name.replace(/^MDP\s+/i, '') };
+}
+function productFor(db, sampleId) {
+  if (!sampleId) return null;
+  return productOf(db.get('SELECT t.code, t.name, t.route FROM samples s JOIN tests t ON t.id = s.test_id WHERE s.sample_id = ?', sampleId));
+}
+
+// The test choice on the Convert tab when Report Centre is opened without a
+// sample: the partner-lab tests (Skin Health opens its own copy). ?test=CODE
+// picks one in advance.
+function testPicker(db, chosen) {
+  const tests = db.all("SELECT code, name, route FROM tests WHERE route = 'partner_lab' AND active = 1 ORDER BY id");
+  const products = {};
+  for (const t of tests) if (!/skin/i.test(`${t.code} ${t.name}`)) products[t.code] = productOf(t) || 0;
+  const opts = tests.map((t) => `<option value="${/skin/i.test(`${t.code} ${t.name}`) ? 'skin' : t.code}"${t.code === chosen ? ' selected' : ''}>${t.name.replace(/[<&"]/g, '')}</option>`).join('');
+  return `<label id="mdp-test" style="display:block;margin:0 0 10px;font-weight:600">Test of this report <select style="margin-left:6px;padding:4px 6px;border-radius:6px;border:1px solid #d1d5db;font:inherit"><option value="">Choose the test</option>${opts}</select>
+<span style="display:block;font-weight:400;font-size:13px;color:#6b7280">The report is labelled with this test's name. Opened from a sample, this is filled in for you.</span></label>
+<script>window.__mdpProducts=${js(products)};window.__mdpPick=document.querySelector('#mdp-test select');window.__mdpPick.addEventListener('change',function(){if(this.value==='skin')location.href='/studio?tool=skin'});</script>`;
 }
 
 const SKIN_CARE_RE = /(skin:\{id:"skin",[^}]*?)care:!1\}/;
@@ -204,7 +223,7 @@ function hasResults(db, storage, user, sampleId) {
 }
 
 // The page for one person, optionally opened on one sample.
-function page(db, storage, user, { sample, step, tool } = {}) {
+function page(db, storage, user, { sample, step, tool, test } = {}) {
   const toolName = toolFor(db, storage, user, sample, step, tool);
   const b = base(db, storage, toolName);
   if (!b) return null;
@@ -213,7 +232,9 @@ function page(db, storage, user, { sample, step, tool } = {}) {
     : '';
   const planWin = b.linked && step === 'plan';
   const tail = (planWin ? PLAN_WINDOW : '') + (b.linked && (sample || planWin) ? `<script>${OPENER}</script>` : '');
-  return b.text.replace('<head>', () => `<head>${head}`).replace('</body>', () => `${tail}</body>`);
+  let text = b.text.replace('<head>', () => `<head>${head}`).replace('</body>', () => `${tail}</body>`);
+  if (toolName === 'main' && !sample && step !== 'plan') text = text.replace('<h2>Partner report</h2>', () => `<h2>Partner report</h2>${testPicker(db, test)}`);
+  return text;
 }
 
 // The action plan window: the white-labelled report and the counselling form

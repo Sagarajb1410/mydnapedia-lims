@@ -204,6 +204,11 @@ test('Fitness and Cardiac reports carry their own name, from the sample\'s test'
   const out = run({ brand: 'MDP CARDIAC HEALTH', short: 'Cardiac Health' })(null, cfg());
   assert.deepStrictEqual(out, { brand: { product: 'MDP CARDIAC HEALTH' }, foreword: { text: 'your {company} Cardiac Health report' }, plan: { tier: 'Cardiac Health' } });
   assert.deepStrictEqual(run(null)(null, cfg()), cfg(), 'a 360 sample keeps the defaults');
+  // Opened without a sample, the test chosen on the Convert tab decides, and converting waits for a choice.
+  const picked = (value) => new Function('window', `const Zn=(e)=>e,qa=()=>({pages:[],fields:{},converted:!1});${studio.useProduct(src)};return Qa`)({ __mdpPick: { value }, __mdpProducts: { MDP360P: 0, MDPFIT: { brand: 'MDP FITNESS', short: 'Fitness' } } });
+  assert.throws(() => picked('')(null, cfg()), /Choose the test of this report/);
+  assert.strictEqual(picked('MDPFIT')(null, cfg()).brand.product, 'MDP FITNESS');
+  assert.deepStrictEqual(picked('MDP360P')(null, cfg()), cfg());
 
   await withApp(async ({ d, store, base }) => {
     const admin = d.get("SELECT * FROM users WHERE email = 'admin@mydnapedia.example'");
@@ -217,6 +222,17 @@ test('Fitness and Cardiac reports carry their own name, from the sample\'s test'
     assert.deepStrictEqual(await product('MDPFIT'), { brand: 'MDP FITNESS', short: 'Fitness' });
     assert.deepStrictEqual(await product('MDPCARD'), { brand: 'MDP CARDIAC HEALTH', short: 'Cardiac Health' });
     assert.strictEqual(await product('MDP360P'), null);
+    // The Reports screen offers each test, and Report Centre opened from it asks for the test.
+    const reportsPage = await (await fetch(`${base}/reports`, { headers: { cookie } })).text();
+    for (const code of ['MDPFIT', 'MDPCARD', 'MDP360P']) assert.ok(reportsPage.includes(`/studio?test=${code}`), code);
+    const fake = FAKE.replace('<input type="file" id="pick">', '<h2>Partner report</h2><input type="file" id="pick">');
+    studio.install(d, store, admin, { data: Buffer.from(fake) });
+    const alone = await (await fetch(`${base}/studio?test=MDPCARD`, { headers: { cookie } })).text();
+    assert.match(alone, /<option value="MDPCARD" selected>MDP Cardiac Health<\/option>/);
+    assert.match(alone, /"MDPCARD":\{"brand":"MDP CARDIAC HEALTH","short":"Cardiac Health"\}/);
+    assert.match(alone, /<option value="skin">MDP Skin Health<\/option>/, 'Skin Health opens its own copy');
+    const onSample = await (await fetch(`${base}/studio?sample=MDP00020260008&step=convert`, { headers: { cookie } })).text();
+    assert.ok(!onSample.includes('id="mdp-test"'), 'opened on a sample, the sample\'s test is used');
   });
 });
 

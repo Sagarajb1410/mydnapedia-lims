@@ -16,7 +16,8 @@ module.exports = function (router, { db, storage }, h) {
     const sample = /^[A-Za-z0-9-]{4,30}$/.test(ctx.query.sample || '') ? ctx.query.sample.toUpperCase() : '';
     if (sample) samples.load(db, ctx.user, sample);
     const step = STEPS.includes(ctx.query.step) ? ctx.query.step : (ctx.user.role === 'counsellor' ? 'form' : 'convert');
-    const page = studio.page(db, storage, ctx.user, { sample, step, tool: ctx.query.tool === 'skin' ? 'skin' : '' });
+    const test = /^[A-Za-z0-9]{2,20}$/.test(ctx.query.test || '') ? ctx.query.test.toUpperCase() : '';
+    const page = studio.page(db, storage, ctx.user, { sample, step, test, tool: ctx.query.tool === 'skin' || /SKIN/.test(test) ? 'skin' : '' });
     if (!page) {
       return h.send(ctx, studio.NAME, html`<h1>${studio.NAME} is not installed yet</h1>
 <p class="sub">${ctx.user.role === 'admin' ? html`Install it once under <a href="/admin#report-centre">Admin, Report Centre</a>.` : 'Ask the admin to install it under Admin.'}</p>`);
@@ -73,11 +74,13 @@ module.exports = function (router, { db, storage }, h) {
 };
 
 // The heading shared by the three Report Centre pages.
-module.exports.head = function head(user, active, sub) {
+module.exports.head = function head(user, active, sub, db) {
   const tabs = [['/reports', 'Reports', ['admin', 'lab']], ['/counselling', 'Counselling', ['admin', 'counsellor']], ['/counselling/availability', 'Availability', ['admin', 'counsellor']], ['/plans', 'Action plans', ['admin', 'counsellor']]]
     .filter(([, , roles]) => roles.includes(user.role));
   return html`<div class="head"><div><h1>${studio.NAME}</h1><p class="sub">${sub}</p></div>
-<div class="actions" style="margin:0">${['admin', 'lab'].includes(user.role) ? html`<a class="btn light" href="/studio?tool=skin" target="_blank" rel="noopener">${icon('reports')}Skin Health</a>` : ''}<a class="btn" href="/studio" target="_blank" rel="noopener">${icon('reports')}Open ${studio.NAME}</a></div></div>
+<div class="actions" style="margin:0"><a class="btn" href="/studio" target="_blank" rel="noopener">${icon('reports')}Open ${studio.NAME}</a></div></div>
+${['admin', 'lab'].includes(user.role) && db ? html`<div class="actions noprint" style="margin:0 0 10px;align-items:center"><b>White-label a report:</b>${db.all("SELECT code, name FROM tests WHERE route = 'partner_lab' AND active = 1 ORDER BY id")
+    .map((t) => html`<a class="btn light small" href="/studio?test=${t.code}" target="_blank" rel="noopener">${t.name}</a>`)}<span class="muted">Opened from a sample, the test is picked for you.</span></div>` : ''}
 ${['admin', 'counsellor'].includes(user.role) ? html`<form method="get" action="/studio" target="_blank" class="actions noprint" style="margin:0 0 14px"><input type="hidden" name="step" value="plan"><input name="sample" placeholder="Sample ID (optional)" pattern="[A-Za-z0-9-]{4,30}" style="max-width:240px"><button>${icon('plan')}Action plan window</button><span class="muted">Add the white-labelled report and the counsellor's filled form there; it creates the plan.</span></form>` : ''}
 ${tabs.length > 1 ? html`<nav class="seg">${tabs.map(([href, label]) => html`<a href="${href}" class="${href === active ? 'on' : ''}">${label}</a>`)}</nav>` : ''}`;
 };
