@@ -309,10 +309,22 @@ async function useReport(blob,name){
   await pause(300);
   var got=current(),rows=got&&got.clinical&&got.clinical.rows?got.clinical.rows.length:0;
   if(!rows){if(keep&&keep.patient&&keep.patient.name)window.__mdpOpenCase(keep);say('#mdp-rep',name+': no results could be read. Use the PDF made by Report Centre, not a scan or a picture-only file.',false);return false}
-  var c=keep&&keep.patient&&keep.patient.name?keep:got,p=Object.assign({},c.patient||{});
-  for(var k in got.patient||{})if(!p[k]&&got.patient[k])p[k]=got.patient[k];
-  window.__mdpOpenCase(Object.assign({},c,{patient:p,clinical:got.clinical}));say('#mdp-msg','');showAge();
-  say('#mdp-rep',name+' ✓ '+rows+' result'+(rows>1?'s':'')+' read'+(p.name?' for '+p.name:''),true);return true;
+  // The tool leaves the sample ID and age blank when reading a report (it
+  // expects our own ID to be typed when converting); a white-labelled report
+  // prints both at the foot of its pages.
+  var gp=Object.assign({},got.patient||{});
+  if((!gp.sampleId||!gp.age)&&window.__mdpPdfText){try{var tx=window.__mdpPdfText(new Uint8Array(await blob.arrayBuffer()),3),m1=/Sample ID *:? *([A-Z]{2,}[0-9][A-Z0-9-]*)/i.exec(tx),m2=/(?:^|[^A-Za-z])Age *: *([0-9]{1,3})(?![0-9])/i.exec(tx);
+    if(!gp.sampleId&&m1)gp.sampleId=m1[1].toUpperCase();if(!gp.age&&m2)gp.age=m2[1]}catch(e){}}
+  var norm=function(x){return String(x||'').toUpperCase().replace(/[^A-Z0-9]/g,'')};
+  // A report for another sample than the one this window holds brings its
+  // own client; the answers of the other sample are not carried over.
+  var other=keep&&keep.patient&&keep.patient.sampleId&&gp.sampleId&&norm(keep.patient.sampleId)!==norm(gp.sampleId);
+  var c=keep&&keep.patient&&keep.patient.name&&!other?keep:Object.assign({},got,{form:other?{}:got.form}),p=Object.assign({},c.patient||{});
+  if(other)p=Object.assign({},gp);
+  for(var k in gp)if(!p[k]&&gp[k])p[k]=gp[k];
+  window.__mdpOpenCase(Object.assign({},c,{patient:p,clinical:got.clinical}));say('#mdp-msg','');var ab=$('#mdp-age');if(ab&&other)ab.value='';showAge();
+  if(other){say('#mdp-frm','Not added yet (this window was opened on sample '+keep.patient.sampleId+'; add the form for '+gp.sampleId+')');var li=$('#l-id');if(li)li.value=gp.sampleId}
+  say('#mdp-rep',name+' ✓ '+rows+' result'+(rows>1?'s':'')+' read'+(p.name?' for '+p.name:'')+(p.sampleId?' ('+p.sampleId+')':'')+(other?'. Note: this window was opened on sample '+keep.patient.sampleId+'; the report’s sample is used. Find '+gp.sampleId+' on the LIMS tab before sending the plan.':''),true);return true;
 }
 // A form whose sample ID differs from the report's may belong to another
 // client, or carry a mistyped ID. It is used only after the user confirms,
