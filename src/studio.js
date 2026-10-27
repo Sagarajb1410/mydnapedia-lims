@@ -314,15 +314,20 @@ async function useReport(blob,name){
   window.__mdpOpenCase(Object.assign({},c,{patient:p,clinical:got.clinical}));say('#mdp-msg','');showAge();
   say('#mdp-rep',name+' ✓ '+rows+' result'+(rows>1?'s':'')+' read'+(p.name?' for '+p.name:''),true);return true;
 }
-async function useForm(file){
+// A form whose sample ID differs from the report's may belong to another
+// client, or carry a mistyped ID. It is used only after the user confirms,
+// with both IDs (and names) shown; the report's sample ID is kept.
+async function useForm(file,force){
   say('#mdp-frm','Reading '+file.name+'…');
   try{var res=await window.__mdpReadForm(new Uint8Array(await file.arrayBuffer()))}catch(e){say('#mdp-frm',file.name+': '+String(e.message||e),false);return false}
   if(!res.answered){say('#mdp-frm',file.name+': this copy of the form has no answers yet.',false);return false}
   var cur=current(),p=Object.assign({},cur.patient||{}),q=res.patient||{},norm=function(x){return String(x||'').toUpperCase().replace(/[^A-Z0-9]/g,'')};
-  if(q.sampleId&&p.sampleId&&norm(q.sampleId)!==norm(p.sampleId)){say('#mdp-frm',file.name+' is for sample '+q.sampleId+', but the report is for '+p.sampleId+'. Not used.',false);return false}
+  var other=q.sampleId&&p.sampleId&&norm(q.sampleId)!==norm(p.sampleId),same=norm(q.name)&&norm(q.name)===norm(p.name);
+  if(other&&!force){say('#mdp-frm','Check before using: '+file.name+' is for sample '+q.sampleId+(q.name?' ('+q.name+')':'')+', but the report is for '+p.sampleId+(p.name?' ('+p.name+')':'')+'. '+(same?'The names match, so the sample number on the form may be mistyped.':'It may belong to another client.')+' ',false);
+    var b=document.createElement('button');b.type='button';b.className='mdp-btn';b.style.marginTop='6px';b.textContent='Yes, it is the same client: use this form';b.addEventListener('click',function(){useForm(file,true)});$('#mdp-frm').appendChild(b);return false}
   for(var k in q)if(!p[k]&&q[k])p[k]=q[k];
   window.__mdpOpenCase(Object.assign({},cur,{patient:p,form:res.form}));say('#mdp-msg','');showAge();
-  say('#mdp-frm',file.name+' ✓ '+res.answered+' answers read'+(res.unmatched&&res.unmatched.length?' ('+res.unmatched.length+' to check on the Check answers tab)':''),true);return true;
+  say('#mdp-frm',file.name+' ✓ '+res.answered+' answers read'+(res.unmatched&&res.unmatched.length?' ('+res.unmatched.length+' to check on the Check answers tab)':'')+(other?'. The form says sample '+q.sampleId+'; the plan uses the report’s '+p.sampleId+'.':''),true);return true;
 }
 function make(){
   var c=current(),rows=c&&c.clinical&&c.clinical.rows?c.clinical.rows.length:0;
