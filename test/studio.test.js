@@ -259,6 +259,42 @@ G.finish=function(e,t={}){let p=G.AP.generate(e),g=p.blocks;for(let r of[/Fitnes
   assert.strictEqual(skin.at(-1).t, 'closing');
 });
 
+test('the action plan is kept short, in the layout of the trimmed sample', () => {
+  const { shortenPlan } = require('../src/studio-plan');
+  const sec = (title) => ({ t: 'section', kicker: 'x', title });
+  const make = (drugs) => ({ blocks: [
+    { t: 'info', rows: [[['Client Name', 'A'], ['Sample ID', 'B']], [['Report Date', '1 Oct'], ['Action Plan Prepared', '']]] },
+    sec('Your Top Priorities at a Glance'), { t: 'table', headers: ['#', 'Priority'], rows: [['1', 'Walk daily'], ['2', 'Check thyroid']] },
+    sec('Nutrition Action Plan'), { t: 'sub', text: 'Close your nutrient gaps' }, { t: 'bullets', items: [{ label: 'Iron', text: '' }] },
+    { t: 'sub', text: 'Gut, liver and gallbladder support' }, { t: 'bullets', items: [{ label: 'Fibre every day', text: '' }, { label: 'Keep a food diary', text: '' }] },
+    sec('Mental Wellbeing Plan'), { t: 'bullets', items: [{ label: 'Daily calm practice', text: '' }, { label: 'When to reach out sooner', text: '' }] },
+    sec('Prevention of Risks'), { t: 'table', rows: [] }, { t: 'sub', text: 'Also noted' },
+    { t: 'bullets', items: [{ label: 'Cancer panel summary', text: '' }, { label: 'Carrier status', text: 'No variants found for PKU.' }, { label: 'Hair Loss (medium)', text: 'From the report.' }, { label: 'Favourable findings', text: 'Normal risk for stroke.' }] },
+    sec('Note for Your Physician — Pharmacogenomic Highlights'), { t: 'p', text: 'Your report tested 3 medicines. Please show this table and the full report to any doctor.' },
+    { t: 'table', rows: drugs },
+    sec('Next Steps'), { t: 'numbered', items: ['Walk daily', 'Check thyroid', '**Move 150 minutes a week**'] },
+  ] });
+  const drugs = [['**Metformin**', 'ATM — AA', 'Decreased response.'], ['Warfarin', 'Baseline', 'Normal.'], ['Codeine', 'Baseline', 'Normal. **You told us you take this medicine** — show it.']];
+  const b = shortenPlan(make(drugs), { priorities: '1. Walk daily' }).blocks;
+  const titles = b.filter((x) => x.t === 'section').map((x) => x.title.split(' —')[0]);
+  assert.deepStrictEqual(titles, ['Nutrition Action Plan', 'Mental Wellbeing Plan', 'Prevention of Risks', 'Note for Your Physician', 'Next Steps'], 'no priorities table');
+  assert.deepStrictEqual(b[0].rows.length, 1, 'no report date row');
+  assert.deepStrictEqual(b.filter((x) => x.t === 'sub').map((x) => x.text), ['Close your nutrient gaps', 'Also noted']);
+  const bullets = b.filter((x) => x.t === 'bullets').map((x) => x.items.map((i) => i.label));
+  assert.deepStrictEqual(bullets, [['Iron', 'Keep a food diary'], ['Daily calm practice', 'Favourable findings'], ['Hair Loss (medium)']]);
+  const steps = b.find((x) => x.t === 'numbered').items;
+  assert.deepStrictEqual(steps, ['Walk daily', '**Move 150 minutes a week**'], 'the counsellor\'s own priority stays, the generated ones go');
+  const doc = b.filter((x) => x.t === 'table').at(-1);
+  assert.deepStrictEqual(doc.rows.map((r) => r[0]), ['**Metformin**', 'Codeine'], 'flagged medicines and ones the client takes');
+  assert.match(b.find((x) => x.t === 'p').text, /Only the flagged medicines and the ones you take are listed below; the other 1 is in your report\. Please show this table/);
+  // A mood concern keeps the reach-out advice; no flagged medicine drops the table.
+  const calm = shortenPlan(make([['Warfarin', 'Baseline', 'Normal.']]), { conditions: ['mood'] }).blocks;
+  assert.ok(calm.some((x) => x.t === 'bullets' && x.items.some((i) => i.label === 'When to reach out sooner')));
+  assert.strictEqual(calm.filter((x) => x.t === 'table').length, 1, 'only the prevention table is left');
+  assert.match(calm.find((x) => x.t === 'p').text, /None is flagged, so no table is shown here/);
+  assert.deepStrictEqual(shortenPlan({}, null), {}, 'anything unexpected is left alone');
+});
+
 test('a counselling form saved as PDF goes through the same reader', () => {
   const { patchForm } = require('../src/studio-form');
   const tool = `<label class="btn">Load a form filled in Word (.docx)<input type="file" id="w-import" accept=".docx">
