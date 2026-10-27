@@ -156,6 +156,25 @@ test('the action plan reopens with the saved results and the counsellor\'s lates
   });
 });
 
+test('a case saved without the client\'s age takes it from the LIMS', async () => {
+  await withApp(async ({ d, store, base }) => {
+    const admin = d.get("SELECT * FROM users WHERE email = 'admin@mydnapedia.example'");
+    studio.install(d, store, admin, { data: Buffer.from(FAKE) });
+    const cookie = await signIn(base, 'admin@mydnapedia.example');
+    const page = await (await fetch(`${base}/studio?sample=MDP00020260014&step=plan`, { headers: { cookie } })).text();
+    assert.ok(page.includes('id="mdp-age"'), 'the action plan window has an age box');
+    const key = /"key":"([0-9a-f]{64})"/.exec(page)[1];
+    const call = async (body) => (await fetch(`${base}/studio/api`, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify({ ...body, key }) })).json();
+    const c = JSON.parse((await call({ action: 'loadCase', sampleId: 'MDP00020260014' })).data.json);
+    const age = c.patient.age;
+    assert.ok(age, 'the LIMS knows the age');
+    c.patient = { ...c.patient, age: '' };
+    assert.ok((await call({ action: 'push', sampleId: 'MDP00020260014', kind: 'case', name: 'case.json', mime: 'application/json', b64: Buffer.from(JSON.stringify(c)).toString('base64') })).ok);
+    const back = JSON.parse((await call({ action: 'loadCase', sampleId: 'MDP00020260014' })).data.json);
+    assert.strictEqual(String(back.patient.age), String(age));
+  });
+});
+
 test('a skin sample opens the Skin Health copy for converting', async () => {
   await withApp(async ({ d, store, base }) => {
     const admin = d.get("SELECT * FROM users WHERE email = 'admin@mydnapedia.example'");

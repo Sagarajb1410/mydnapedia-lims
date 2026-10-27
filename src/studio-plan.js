@@ -34,7 +34,8 @@ R.blocks=out;return R})`;
 // 360 plan the team had trimmed by hand in Word), for every test:
 //  - no Report Date / Action Plan Prepared row;
 //  - no "Top Priorities at a Glance" table, and Next Steps no longer repeats
-//    it (priorities the counsellor typed on the form stay in Next Steps);
+//    it (priorities the counsellor typed on the form, and lines for
+//    conditions ticked on it, stay in Next Steps);
 //  - no "Gut, liver and gallbladder" block (its food-diary tip moves to the
 //    nutrient gaps; the gut advice is already in the Prevention table);
 //  - "When to reach out sooner" only when the client reported a mood concern
@@ -63,7 +64,9 @@ function shortenPlan(R, form) {
   const top = section(/Top Priorities/);
   if (top) {
     const t = find(top, 'table');
-    const auto = t ? t.rows.map((r) => r[1]).filter((x) => !typed.includes(x)) : [];
+    // Lines the tool writes for conditions ticked on the form stay too.
+    const ticked = /^(Have your gallbladder problem|Keep your liver under review|Keep a headache diary|Keep your asthma review|Keep your mental-health support)/;
+    const auto = t ? t.rows.map((r) => r[1]).filter((x) => !typed.includes(x) && !ticked.test(x)) : [];
     B.splice(top[0], top[1] - top[0]);
     const steps = find(section(/^Next Steps/), 'numbered');
     if (steps) steps.items = steps.items.filter((x) => !auto.includes(x));
