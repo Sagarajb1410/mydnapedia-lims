@@ -248,7 +248,7 @@ const PLAN_WINDOW = `<style>[role=tab][data-tab=convert],[role=tab][data-tab=ema
 .mdp-n{flex:none;width:26px;height:26px;border-radius:50%;background:#f9b300;color:#1f2937;font-weight:700;display:grid;place-items:center}
 #mdp-plan .st{font-size:13px;color:#6b7280;overflow-wrap:anywhere}#mdp-plan .st.ok{color:#15803d}#mdp-plan .st.bad{color:#b91c1c}
 .mdp-btn,#mdp-make{flex:none;cursor:pointer;padding:7px 14px;border-radius:8px;border:1px solid #d1d5db;background:#fff;font:600 13px Montserrat,system-ui,sans-serif;color:#1f2937}
-#mdp-make{background:#f9b300;border-color:#f9b300}.mdp-btn input{display:none}#mdp-tier{margin-top:4px;padding:4px 6px;border-radius:6px;border:1px solid #d1d5db}
+#mdp-make{background:#f9b300;border-color:#f9b300}.mdp-btn input{display:none}#mdp-tier,#mdp-age{margin-top:4px;padding:4px 6px;border-radius:6px;border:1px solid #d1d5db}#mdp-age{width:64px;margin-left:6px}
 #mdp-msg{margin-top:10px;font-size:14px}</style>
 <script>window.__mdpPlanWin=true;document.title='Action plan'+(window.__LIMS&&window.__LIMS.sample?' · '+window.__LIMS.sample:'');</script>`;
 
@@ -281,11 +281,19 @@ function keepCase(){var last=null;setInterval(async function(){
 function say(id,text,ok){var r=$(id);if(r){r.textContent=text;r.className='st'+(ok===true?' ok':ok===false?' bad':'')}}
 function answers(f){var n=0;if(!f)return 0;for(var k in f){var v=f[k];if(k==='life'){for(var j in v)if(v[j])n++}else if(Array.isArray(v)?v.length:v)n++}return n}
 function current(){return window.__mdpCase?window.__mdpCase().json:null}
+// The client's age, from the case or worked out from a date of birth
+// (YYYY-MM-DD or DD/MM/YYYY). Shown in step 3 so it can be typed when the
+// report and the form both leave it out.
+function ageFrom(p){p=p||{};var a=String(p.age==null?'':p.age).replace(/[^0-9]/g,'');if(a)return a;
+  var x=String(p.dob||'').trim().split(/[^0-9]+/).filter(Boolean).map(Number);if(x.length<3)return '';
+  var y=x[0]>999?x[0]:x[2],mo=x[1],dd=x[0]>999?x[2]:x[0];if(y<1900)return '';
+  var n=new Date(),r=n.getFullYear()-y;if(n.getMonth()+1<mo||(n.getMonth()+1===mo&&n.getDate()<dd))r--;return r>=0&&r<130?String(r):''}
+function showAge(){var b=$('#mdp-age'),c=current();if(b&&!b.value&&c)b.value=ageFrom(c.patient)}
 function panel(){document.title='Action plan'+(L.sample?' · '+L.sample:'');var d=document.createElement('div');d.id='mdp-plan';var t=L.product?L.product.short:(L.tool==='skin'?'Skin Health':'360 Premium');
   d.innerHTML='<div class="mdp-head"><b>Action plan</b><span>Add the white-labelled report and the counsellor’s filled form, then create the plan.</span></div>'
   +'<div class="mdp-steps"><div class="mdp-step"><span class="mdp-n">1</span><div><b>White-labelled report (PDF)</b><div id="mdp-rep" class="st">Not added yet</div></div><label class="mdp-btn">Choose PDF<input type="file" id="mdp-pick" accept="application/pdf,.pdf"></label></div>'
   +'<div class="mdp-step"><span class="mdp-n">2</span><div><b>Counsellor’s filled form (Word or PDF)</b><div id="mdp-frm" class="st">Not added yet</div></div><label class="mdp-btn">Choose file<input type="file" id="mdp-form" accept=".docx,.pdf,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"></label></div>'
-  +'<div class="mdp-step"><span class="mdp-n">3</span><div><b>Test</b><div class="st"><select id="mdp-tier">'+['360 Premium','Fitness','Cardiac Health','Skin Health'].map(function(x){return '<option'+(x===t?' selected':'')+'>'+x+'</option>'}).join('')+'</select></div></div><button type="button" id="mdp-make">Create action plan</button></div></div>'
+  +'<div class="mdp-step"><span class="mdp-n">3</span><div><b>Test and client’s age</b><div class="st"><select id="mdp-tier">'+['360 Premium','Fitness','Cardiac Health','Skin Health'].map(function(x){return '<option'+(x===t?' selected':'')+'>'+x+'</option>'}).join('')+'</select><input id="mdp-age" type="number" min="0" max="120" placeholder="Age" title="Client’s age in years" aria-label="Client’s age in years"></div></div><button type="button" id="mdp-make">Create action plan</button></div></div>'
   +'<div id="mdp-msg" class="st"></div>';
   document.body.insertBefore(d,document.body.firstChild);
   var lbl=document.querySelector('[role=tab][data-tab="form"]');if(lbl)lbl.textContent='Check answers';
@@ -301,27 +309,45 @@ async function useReport(blob,name){
   await pause(300);
   var got=current(),rows=got&&got.clinical&&got.clinical.rows?got.clinical.rows.length:0;
   if(!rows){if(keep&&keep.patient&&keep.patient.name)window.__mdpOpenCase(keep);say('#mdp-rep',name+': no results could be read. Use the PDF made by Report Centre, not a scan or a picture-only file.',false);return false}
-  var c=keep&&keep.patient&&keep.patient.name?keep:got,p=Object.assign({},c.patient||{});
-  for(var k in got.patient||{})if(!p[k]&&got.patient[k])p[k]=got.patient[k];
-  window.__mdpOpenCase(Object.assign({},c,{patient:p,clinical:got.clinical}));say('#mdp-msg','');
-  say('#mdp-rep',name+' ✓ '+rows+' result'+(rows>1?'s':'')+' read'+(p.name?' for '+p.name:''),true);return true;
+  // The tool leaves the sample ID and age blank when reading a report (it
+  // expects our own ID to be typed when converting); a white-labelled report
+  // prints both at the foot of its pages.
+  var gp=Object.assign({},got.patient||{});
+  if((!gp.sampleId||!gp.age)&&window.__mdpPdfText){try{var tx=window.__mdpPdfText(new Uint8Array(await blob.arrayBuffer()),3),m1=/Sample ID *:? *([A-Z]{2,}[0-9][A-Z0-9-]*)/i.exec(tx),m2=/(?:^|[^A-Za-z])Age *: *([0-9]{1,3})(?![0-9])/i.exec(tx);
+    if(!gp.sampleId&&m1)gp.sampleId=m1[1].toUpperCase();if(!gp.age&&m2)gp.age=m2[1]}catch(e){}}
+  var norm=function(x){return String(x||'').toUpperCase().replace(/[^A-Z0-9]/g,'')};
+  // A report for another sample than the one this window holds brings its
+  // own client; the answers of the other sample are not carried over.
+  var other=keep&&keep.patient&&keep.patient.sampleId&&gp.sampleId&&norm(keep.patient.sampleId)!==norm(gp.sampleId);
+  var c=keep&&keep.patient&&keep.patient.name&&!other?keep:Object.assign({},got,{form:other?{}:got.form}),p=Object.assign({},c.patient||{});
+  if(other)p=Object.assign({},gp);
+  for(var k in gp)if(!p[k]&&gp[k])p[k]=gp[k];
+  window.__mdpOpenCase(Object.assign({},c,{patient:p,clinical:got.clinical}));say('#mdp-msg','');var ab=$('#mdp-age');if(ab&&other)ab.value='';showAge();
+  if(other){say('#mdp-frm','Not added yet (this window was opened on sample '+keep.patient.sampleId+'; add the form for '+gp.sampleId+')');var li=$('#l-id');if(li)li.value=gp.sampleId}
+  say('#mdp-rep',name+' ✓ '+rows+' result'+(rows>1?'s':'')+' read'+(p.name?' for '+p.name:'')+(p.sampleId?' ('+p.sampleId+')':'')+(other?'. Note: this window was opened on sample '+keep.patient.sampleId+'; the report’s sample is used. Find '+gp.sampleId+' on the LIMS tab before sending the plan.':''),true);return true;
 }
-async function useForm(file){
+// A form whose sample ID differs from the report's may belong to another
+// client, or carry a mistyped ID. It is used only after the user confirms,
+// with both IDs (and names) shown; the report's sample ID is kept.
+async function useForm(file,force){
   say('#mdp-frm','Reading '+file.name+'…');
   try{var res=await window.__mdpReadForm(new Uint8Array(await file.arrayBuffer()))}catch(e){say('#mdp-frm',file.name+': '+String(e.message||e),false);return false}
   if(!res.answered){say('#mdp-frm',file.name+': this copy of the form has no answers yet.',false);return false}
   var cur=current(),p=Object.assign({},cur.patient||{}),q=res.patient||{},norm=function(x){return String(x||'').toUpperCase().replace(/[^A-Z0-9]/g,'')};
-  if(q.sampleId&&p.sampleId&&norm(q.sampleId)!==norm(p.sampleId)){say('#mdp-frm',file.name+' is for sample '+q.sampleId+', but the report is for '+p.sampleId+'. Not used.',false);return false}
+  var other=q.sampleId&&p.sampleId&&norm(q.sampleId)!==norm(p.sampleId),same=norm(q.name)&&norm(q.name)===norm(p.name);
+  if(other&&!force){say('#mdp-frm','Check before using: '+file.name+' is for sample '+q.sampleId+(q.name?' ('+q.name+')':'')+', but the report is for '+p.sampleId+(p.name?' ('+p.name+')':'')+'. '+(same?'The names match, so the sample number on the form may be mistyped.':'It may belong to another client.')+' ',false);
+    var b=document.createElement('button');b.type='button';b.className='mdp-btn';b.style.marginTop='6px';b.textContent='Yes, it is the same client: use this form';b.addEventListener('click',function(){useForm(file,true)});$('#mdp-frm').appendChild(b);return false}
   for(var k in q)if(!p[k]&&q[k])p[k]=q[k];
-  window.__mdpOpenCase(Object.assign({},cur,{patient:p,form:res.form}));say('#mdp-msg','');
-  say('#mdp-frm',file.name+' ✓ '+res.answered+' answers read'+(res.unmatched&&res.unmatched.length?' ('+res.unmatched.length+' to check on the Check answers tab)':''),true);return true;
+  window.__mdpOpenCase(Object.assign({},cur,{patient:p,form:res.form}));say('#mdp-msg','');showAge();
+  say('#mdp-frm',file.name+' ✓ '+res.answered+' answers read'+(res.unmatched&&res.unmatched.length?' ('+res.unmatched.length+' to check on the Check answers tab)':'')+(other?'. The form says sample '+q.sampleId+'; the plan uses the report’s '+p.sampleId+'.':''),true);return true;
 }
 function make(){
   var c=current(),rows=c&&c.clinical&&c.clinical.rows?c.clinical.rows.length:0;
   if(!rows)return say('#mdp-msg','Add the white-labelled report first (step 1).',false);
   if(!answers(c.form))return say('#mdp-msg','Add the counsellor’s filled form first (step 2).',false);
-  if(!c.patient||!c.patient.age)return say('#mdp-msg','The client’s age is missing. Add it on the Check answers tab, or use the form with the patient details filled in.',false);
-  window.__mdpOpenCase(Object.assign({},c,{plan:Object.assign({},c.plan||{},{tier:$('#mdp-tier').value})}));
+  var age=String($('#mdp-age').value||'').trim()||ageFrom(c.patient);
+  if(!age){$('#mdp-age').focus();return say('#mdp-msg','Type the client’s age (in years) in the box beside the test in step 3, then create the plan again.',false)}
+  window.__mdpOpenCase(Object.assign({},c,{patient:Object.assign({},c.patient||{},{age:age}),plan:Object.assign({},c.plan||{},{tier:$('#mdp-tier').value})}));
   tab('plan');say('#mdp-msg','Action plan created below. Download it as Word or PDF'+(L.sample?', or send it to the LIMS on the LIMS tab.':'.'),true);
 }
 async function planWindow(){
@@ -334,6 +360,7 @@ async function planWindow(){
     var r=await fetch('/studio/branded/'+encodeURIComponent(L.sample),{credentials:'same-origin'});
     if(r.ok)await useReport(await r.blob(),decodeURIComponent(r.headers.get('X-File-Name')||'report.pdf'));
     else if((current()||{}).clinical)say('#mdp-rep','✓ Results saved in the LIMS at conversion. Choose a PDF to use another copy.',true);
+    showAge();
   }
   tab('form');
 }
@@ -374,7 +401,23 @@ function docs(db, samplePk) {
 // from the LIMS form. When the counsellor filled in or changed the LIMS form
 // after the case was saved, their answers replace the saved ones, so the action
 // plan can be made without converting the report again.
+// A case saved at conversion takes the client's details from the report,
+// which can leave out the age. Blanks are filled from the sample in the LIMS.
 function caseFor(db, storage, user, s) {
+  const json = savedCase(db, storage, user, s);
+  if (!json) return json;
+  let c;
+  try { c = JSON.parse(json); } catch { return json; }
+  const p = db.get('SELECT * FROM patients WHERE id = ?', s.patient_id);
+  if (!p || !c || typeof c !== 'object') return json;
+  const lims = { name: p.full_name, sampleId: s.sample_id, gender: p.gender, age: p.dob ? ageOf(p.dob) : String(samples.patientAge(p) ?? '') };
+  const patient = { ...(c.patient || {}) };
+  let changed = false;
+  for (const [k, v] of Object.entries(lims)) if ((patient[k] == null || patient[k] === '') && v) { patient[k] = v; changed = true; }
+  return changed ? JSON.stringify({ ...c, patient }) : json;
+}
+
+function savedCase(db, storage, user, s) {
   const saved = db.get("SELECT * FROM studio_docs WHERE sample_pk = ? AND kind = 'case' ORDER BY id DESC LIMIT 1", s.id);
   const counsellingRole = ['admin', 'counsellor'].includes(user.role);
   if (!saved) return counsellingRole && counselling.STAGES.includes(s.status) ? JSON.stringify(counselling.caseFile(db, user, s.sample_id)) : null;
