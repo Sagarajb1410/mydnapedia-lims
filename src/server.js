@@ -52,6 +52,20 @@ const runReminders = () => {
 runReminders();
 setInterval(runReminders, 3600 * 1000).unref();
 
+// Hosts without a nightly job (Render) set NIGHTLY_BACKUP=1: the LIMS writes
+// today's backup itself once a day, checked at start and every hour.
+if (process.env.NIGHTLY_BACKUP === '1') {
+  const { backup } = require('./backup');
+  const { istDate } = require('./util');
+  const daily = () => {
+    try {
+      if (!fs.existsSync(path.join(config.dataDir, 'backups', istDate(), 'lims.sqlite'))) console.log('Backup written to ' + backup());
+    } catch (e) { console.error('Backup failed:', e); }
+  };
+  daily();
+  setInterval(daily, 3600 * 1000).unref();
+}
+
 const app = createApp({ db, storage: storage.create() });
 const url = `http://${config.host === '0.0.0.0' ? 'localhost' : config.host}:${config.port}`;
 
