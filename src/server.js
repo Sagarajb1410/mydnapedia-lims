@@ -52,9 +52,10 @@ const runReminders = () => {
 runReminders();
 setInterval(runReminders, 3600 * 1000).unref();
 
-// Hosts without a nightly job (Render) set NIGHTLY_BACKUP=1: the LIMS writes
-// today's backup itself once a day, checked at start and every hour.
-if (process.env.NIGHTLY_BACKUP === '1') {
+// The LIMS writes today's backup itself once a day (checked at start and every
+// hour), on a computer as well as online. NIGHTLY_BACKUP=0 turns it off; the
+// demo data is never backed up.
+if (process.env.NIGHTLY_BACKUP !== '0' && !process.argv.includes('--demo')) {
   const { backup } = require('./backup');
   const { istDate } = require('./util');
   const daily = () => {

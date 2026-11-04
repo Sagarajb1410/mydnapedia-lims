@@ -57,7 +57,7 @@ Until then, the LIMS also works at the onrender.com address Render shows.
 
 - **Render disk snapshot:** every day, kept for 7 days. To restore one, open the service, then **Disks**, then **Snapshots**.
 - **LIMS backup:** every day the LIMS also writes a copy of the database and files to `/var/data/backups`, and keeps 14 days. This helps if something is deleted by mistake.
-- Both copies are inside Render. For a copy elsewhere, ask for the off-site backup to be added (an S3 bucket or Google Drive).
+- **Your own copy:** Admin, **Download backup** gives one zip with the database and every file. Download it weekly and keep it outside Render.
 
 ## Updating to a new version
 

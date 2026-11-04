@@ -79,7 +79,7 @@ function zip(files) {
   // Fixed DOS date (1 Jan 2024) so the same data gives the same file.
   const time = 0, date = ((2024 - 1980) << 9) | (1 << 5) | 1;
   for (const [name, text] of files) {
-    const data = Buffer.from(text, 'utf8');
+    const data = Buffer.isBuffer(text) ? text : Buffer.from(text, 'utf8');
     const comp = zlib.deflateRawSync(data);
     const crc = zlib.crc32(data);
     const nameBuf = Buffer.from(name, 'utf8');
@@ -164,4 +164,4 @@ function read(buf) {
   return Array.from(rows, (r) => r || []);
 }
 
-module.exports = { workbook, colName, read };
+module.exports = { workbook, colName, read, zip, unzip };
