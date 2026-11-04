@@ -63,6 +63,12 @@ test('main screens render for every role', async () => {
     assert.strictEqual(Buffer.from(await xl.arrayBuffer()).readUInt32LE(0), 0x04034b50);
     const partner = await signIn(base, 'sunrise@demo.example');
     assert.notStrictEqual((await fetch(`${base}/monthly/export`, { headers: { cookie: partner }, redirect: 'manual' })).status, 200);
+    // The full backup downloads as one zip, for the admin only.
+    const bk = await fetch(`${base}/admin/backup`, { headers: { cookie } });
+    assert.strictEqual(bk.status, 200);
+    assert.match(bk.headers.get('content-disposition'), /MyDNAPedia-LIMS-backup-\d{4}-\d{2}-\d{2}\.zip/);
+    assert.strictEqual(Buffer.from(await bk.arrayBuffer()).readUInt32LE(0), 0x04034b50);
+    assert.notStrictEqual((await fetch(`${base}/admin/backup`, { headers: { cookie: partner }, redirect: 'manual' })).status, 200);
   });
 });
 
