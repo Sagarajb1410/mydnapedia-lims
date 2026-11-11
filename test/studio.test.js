@@ -362,3 +362,12 @@ test('question marks the partner\'s PDF printed for lost characters, and its spe
     assert.strictEqual(fix(same), same, 'a real question mark, a web address and unchanged lines are left alone');
   assert.strictEqual(patchText('<script>var other=1</script>'), '<script>var other=1</script>', 'a tool without that step is left alone');
 });
+
+test('slips from a second Fitness report are corrected too', () => {
+  const { patchText } = require('../src/studio-text');
+  const tool = '<script>function zi(e){return!!e&&/[A-Za-z0-9]/.test(e)}function Jn(e,t){let r=e;for(let n of t){if(!n||!n.find||n.find===n.replace)continue;let i=0,a="";for(;;){let s=r.indexOf(n.find,i);if(s<0)break;let o=r[s-1],l=r[s+n.find.length],h=!(zi(n.find[0])&&zi(o))&&!(zi(n.find[n.find.length-1])&&zi(l));a+=r.slice(i,s)+(h?n.replace:n.find),i=s+n.find.length}r=a+r.slice(i)}return r}</script>';
+  const Jn = new Function(`${patchText(tool).slice(8, -9)}; return Jn;`)();
+  assert.strictEqual(Jn('The BCMO1 gene (?-carotene 15,15?-monooxygenase 1) chemically', []), 'The BCMO1 gene (beta-carotene 15,15′-monooxygenase 1) chemically');
+  assert.strictEqual(Jn('6. Vitamin A fortified crap (steal from Vit D).', []), '6. Vitamin A-fortified foods, such as breakfast cereals and milk.');
+  assert.strictEqual(Jn('Magnesium is one of the abundant minerals in the body', []), 'Magnesium is one of the most abundant minerals in the body');
+});

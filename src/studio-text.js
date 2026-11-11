@@ -38,6 +38,17 @@ const FIXES = [
   ['The MC4R -Melanocortin receptor gene', 'The MC4R (melanocortin 4 receptor) gene'],
   ['warm-up ,', 'warm-up,'],
   ['region : Human', 'region: Human'],
+  // From a Fitness report (MDP00020260051), 11 Nov 2026
+  ['(?-carotene 15,15?-monooxygenase', '(beta-carotene 15,15\u2032-monooxygenase'],
+  ['Vitamin A fortified crap (steal from Vit D).', 'Vitamin A-fortified foods, such as breakfast cereals and milk.'],
+  ['4. vegetables like broccoli', '4. Vegetables like broccoli'],
+  ['salmon, Mackerel, herring', 'salmon, mackerel, herring'],
+  ['eggs are also good source of', 'eggs are also good sources of'],
+  ['one of the abundant minerals', 'one of the most abundant minerals'],
+  ['belongs to a immunoglobulin', 'belongs to an immunoglobulin'],
+  ['Prostate specific antigen (PSA), is', 'Prostate-specific antigen (PSA) is'],
+  ['non insulin dependent', 'non-insulin-dependent'],
+  ['pain and Enhanced', 'pain and enhanced'],
 ];
 
 // Greek letters and other characters missing from the tool's Montserrat.
