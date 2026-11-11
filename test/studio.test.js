@@ -340,3 +340,25 @@ async function vc(e){let t,r;try{t=await ls.default.loadAsync(e),r=await t.file(
   assert.match(xml, /E2\. Preventive Health Check<\/w:t><\/w:r><\/w:p><w:tbl><w:tr><w:tc><w:p><w:r><w:t xml:space='preserve'><\/w:t>/, 'an empty answer box keeps its place');
   assert.throws(() => run(null, () => ({ countPages: () => 1, loadPage: () => 0 }), () => ({ h: 842, lines: [] }))(new Uint8Array(4)), /no readable text/);
 });
+
+test('question marks the partner\'s PDF printed for lost characters, and its spelling slips, are corrected', () => {
+  const { patchText } = require('../src/studio-text');
+  // The tool's own correction step, as minified in the real file.
+  const tool = '<script>function zi(e){return!!e&&/[A-Za-z0-9]/.test(e)}function Jn(e,t){let r=e;for(let n of t){if(!n||!n.find||n.find===n.replace)continue;let i=0,a="";for(;;){let s=r.indexOf(n.find,i);if(s<0)break;let o=r[s-1],l=r[s+n.find.length],h=!(zi(n.find[0])&&zi(o))&&!(zi(n.find[n.find.length-1])&&zi(l));a+=r.slice(i,s)+(h?n.replace:n.find),i=s+n.find.length}r=a+r.slice(i)}return r}</script>';
+  const out = patchText(tool);
+  assert.notStrictEqual(out, tool, 'the correction step is found');
+  const Jn = new Function(`${out.slice(8, -9)}; return Jn;`)();
+  const fix = (s) => Jn(s, [{ find: 'TGF-?', replace: 'TGF-beta' }]);
+  assert.strictEqual(fix('The ?2-adrenergic receptors (ADRB2) gene'), 'The beta-2 adrenergic receptors (ADRB2) gene');
+  assert.strictEqual(fix('exercise outcomes ? either'), 'exercise outcomes – either');
+  assert.strictEqual(fix('influenced by gene?diet, gene?exercise interactions'), 'influenced by gene-diet, gene-exercise interactions');
+  assert.strictEqual(fix('an individual?s ability'), 'an individual’s ability');
+  assert.strictEqual(fix('Resiliant to stressful situations'), 'Resilient to stressful situations');
+  assert.strictEqual(fix('You maybe  slightly susceptible'), 'You may be slightly susceptible', 'any run of spaces matches');
+  assert.strictEqual(fix('High likely to have peanut allergy'), 'Highly likely to have peanut allergy');
+  assert.strictEqual(fix('needs to further investigated.'), 'needs to be further investigated.');
+  assert.strictEqual(fix('TGF-? levels with β cells'), 'TGF-beta levels with beta cells', 'a rewritten line spells out letters the font lacks');
+  for (const same of ['What is VO2 max? It is', 'see https://x.org/a?b=c', 'A line with β left as it is', 'Highly likely to have'])
+    assert.strictEqual(fix(same), same, 'a real question mark, a web address and unchanged lines are left alone');
+  assert.strictEqual(patchText('<script>var other=1</script>'), '<script>var other=1</script>', 'a tool without that step is left alone');
+});
