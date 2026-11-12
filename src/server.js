@@ -52,6 +52,21 @@ const runReminders = () => {
 runReminders();
 setInterval(runReminders, 3600 * 1000).unref();
 
+// The LIMS writes today's backup itself once a day (checked at start and every
+// hour), on a computer as well as online. NIGHTLY_BACKUP=0 turns it off; the
+// demo data is never backed up.
+if (process.env.NIGHTLY_BACKUP !== '0' && !process.argv.includes('--demo')) {
+  const { backup } = require('./backup');
+  const { istDate } = require('./util');
+  const daily = () => {
+    try {
+      if (!fs.existsSync(path.join(config.dataDir, 'backups', istDate(), 'lims.sqlite'))) console.log('Backup written to ' + backup());
+    } catch (e) { console.error('Backup failed:', e); }
+  };
+  daily();
+  setInterval(daily, 3600 * 1000).unref();
+}
+
 const app = createApp({ db, storage: storage.create() });
 const url = `http://${config.host === '0.0.0.0' ? 'localhost' : config.host}:${config.port}`;
 
@@ -65,8 +80,7 @@ function openBrowser() {
 const server = app.server();
 server.on('error', (e) => {
   if (e.code === 'EADDRINUSE') {
-    console.error(`\n  Port ${config.port} is already in use. The LIMS is probably already running in another window:\n  open ${url} in your browser, or close the other window and start again.\n`);
-    if (process.argv.includes('--open')) openBrowser();
+    console.error(`\n  Port ${config.port} is already in use. The LIMS is probably already running in another window:\n  open ${url} in your browser, or close the other window and start again.\n  To switch between the demo and your own data, close the other LIMS window first.\n`);
   } else {
     console.error(e);
   }

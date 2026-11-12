@@ -6,11 +6,20 @@ const billing = require('../billing');
 const barcode = require('../barcode');
 const tracking = require('../tracking');
 const invoice = require('../invoice');
+const track = require('../track');
+const quick = require('../quick');
+const past = require('../past');
 const { fmtDateTime, fmtDate, rupees, toPaise, UserError, getSetting, istDate } = require('../util');
 
 const PAY_MODES = ['Cash', 'UPI', 'Card', 'Bank transfer', ['pending', 'Payment pending']];
 const GST_RATES = [['0', '0%'], ['500', '5%'], ['1200', '12%'], ['1800', '18%']];
+const STEP_DONE = {
+  collect: 'marked collected', courier: 'booked for courier pickup', receive: 'marked as reached the central lab',
+  onward: 'booked to go to the partner lab', partner_received: 'marked as received at the partner lab', in_house: 'started in-house testing',
+};
 const ROUTE_LABEL = { in_house: 'In-house', partner_lab: 'Partner lab' };
+// The end of today in India, so the date picker greys out future days.
+const maxLocal = () => `${istDate()}T23:59`;
 
 function isStaff(user) {
   return user.role === 'admin' || user.role === 'lab';
@@ -25,6 +34,14 @@ module.exports = function (router, { db }, h) {
     const counts = Object.fromEntries(db.all('SELECT status, COUNT(*) c FROM samples GROUP BY status').map((r) => [r.status, r.c]));
     const n = (st) => st.reduce((t, k) => t + (counts[k] || 0), 0);
     const active = n(Object.keys(samples.STATUSES).filter((k) => !['DELIVERED', 'CLOSED', 'CANCELLED'].includes(k)));
+    // How many samples wait on each next step for this user, in journey order.
+    const tally = new Map();
+    for (const r of db.all(`SELECT s.status, t.route, a.type AS account_type FROM samples s JOIN tests t ON t.id = s.test_id JOIN accounts a ON a.id = s.account_id
+        WHERE s.status NOT IN ('DELIVERED', 'CLOSED', 'CANCELLED')`)) {
+      const st = quick.nextStep(u, r);
+      if (st) tally.set(st, (tally.get(st) || 0) + 1);
+    }
+    const waiting = Object.keys(quick.STEP_INFO).filter((st) => tally.has(st)).map((st) => [st, tally.get(st)]);
     const lastDay = db.get('SELECT COUNT(*) c FROM samples WHERE registered_at >= ?', new Date(Date.now() - 86400000).toISOString()).c;
     const pendingOutbox = db.get("SELECT COUNT(*) c FROM notifications WHERE status = 'pending'").c;
     const board = tracking.tatBoard(db);
@@ -69,9 +86,8 @@ ${watch.length ? html`<ul class="list">${watch.map((r) => {
 ${u.role === 'admin' ? html`<div class="card"><div class="head" style="margin-bottom:6px"><h2 style="margin:0">Partner credit</h2><a href="/billing" style="font-size:13px;font-weight:600">Billing</a></div>
 ${low.length ? html`<ul class="list">${low.map((a) => html`<li><div class="grow"><b><a href="/billing/ledger/${a.id}">${a.name}</a></b><span>Reminder level ${rupees(a.low_balance_paise)}</span></div><b class="num ${a.bal < 0 ? 'neg' : ''}">${rupees(a.bal)}</b></li>`)}</ul>` : html`<div class="empty">${icon('check')}Every partner has enough credit.</div>`}
 ${pendingRecharges ? html`<div class="flash warn" style="margin:12px 0 0">${icon('info')}<div><a href="/billing">${pendingRecharges} recharge request${pendingRecharges === 1 ? '' : 's'}</a> waiting for your review.</div></div>` : ''}</div>` : ''}
-<div class="card"><h2>Quick actions</h2><div class="actions" style="margin:0;display:grid;grid-template-columns:1fr 1fr;gap:10px">
-<a class="btn light" href="/tracking/pickups">${icon('tracking')}Pickups</a><a class="btn light" href="/tracking/receive">${icon('samples')}Lab receipt</a>
-<a class="btn light" href="/tracking/onward">${icon('arrow')}Partner dispatch</a><a class="btn light" href="/reports">${icon('reports')}Reports</a></div></div>
+<div class="card"><h2>Waiting for you</h2>${waiting.length ? html`<ul class="list">${waiting.map(([st, n]) => html`<li><div class="grow"><b>${quick.STEP_INFO[st].label}</b><span>${quick.STEP_INFO[st].hint}</span></div><b class="num">${n}</b></li>`)}</ul>
+<div class="actions" style="margin:12px 0 0"><a class="btn" href="/samples?todo=1">Do them on the Samples page</a></div>` : html`<div class="empty">${icon('check')}Nothing is waiting for you.</div>`}</div>
 </div></div>`);
   });
 
@@ -92,8 +108,8 @@ ${pendingRecharges ? html`<div class="flash warn" style="margin:12px 0 0">${icon
     const status = samples.STATUSES[ctx.query.status] ? ctx.query.status : '';
     if (status) { where.push('s.status = ?'); params.push(status); } else if (phase) { where.push(`s.status IN (${phase.statuses.map(() => '?').join(',')})`); params.push(...phase.statuses); }
     if (isStaff(u) && ctx.query.account) { where.push('s.account_id = ?'); params.push(Number(ctx.query.account)); }
-    const rows = db.all(
-      `SELECT s.*, p.full_name, p.mobile, p.gender, p.dob, p.city, t.name AS test_name, a.name AS account_name, a.type AS account_type, b.net_paise, b.status AS bill_status
+    let rows = db.all(
+      `SELECT s.*, p.full_name, p.mobile, p.gender, p.dob, p.age_years, p.created_at AS patient_created_at, p.city, t.name AS test_name, t.route AS test_route, a.name AS account_name, a.type AS account_type, b.net_paise, b.status AS bill_status
          FROM samples s JOIN patients p ON p.id = s.patient_id JOIN tests t ON t.id = s.test_id
          JOIN accounts a ON a.id = s.account_id LEFT JOIN bills b ON b.sample_pk = s.id
         WHERE ${where.join(' AND ')} ORDER BY s.id DESC LIMIT 200`, ...params);
@@ -108,17 +124,31 @@ ${pendingRecharges ? html`<div class="flash warn" style="margin:12px 0 0">${icon
       const qs = new URLSearchParams({ ...(q ? { q } : {}), ...(ctx.query.account ? { account: ctx.query.account } : {}), ...extra });
       return `/samples${qs.toString() ? `?${qs}` : ''}`;
     };
-    const age = (dob) => {
-      if (!dob) return '';
-      const d = new Date(dob); const now = new Date();
-      let y = now.getFullYear() - d.getFullYear();
-      if (now < new Date(now.getFullYear(), d.getMonth(), d.getDate())) y--;
-      return `${y} y`;
+    const age = (r) => {
+      const y = samples.patientAge({ dob: r.dob, age_years: r.age_years, created_at: r.patient_created_at });
+      return y == null ? '' : `${y} y`;
     };
     const title = u.role === 'partner' ? 'Your samples' : u.role === 'counsellor' ? 'Clients' : 'Samples';
+    // Next step for each row: one click here, or a button that opens where it
+    // is done. "Waiting for me" keeps only the rows with a step for this user.
+    const todoCount = rows.filter((r) => quick.nextStep(u, r)).length;
+    const todo = ctx.query.todo === '1';
+    if (todo) rows = rows.filter((r) => quick.nextStep(u, r));
+    const steps = rows.map((r) => quick.nextStep(u, r));
+    const offered = quick.STEPS.filter((st) => steps.includes(st));
+    const canStep = true;
+    const stepCell = (r, st) => {
+      if (st && !quick.STEPS.includes(st)) return html`<a class="btn small" href="${quick.stepHref(st, r.sample_id)}" title="${quick.STEP_INFO[st].hint}">${quick.STEP_INFO[st].label}</a>`;
+      if (st) return html`<div style="display:flex;flex-direction:column;align-items:flex-start;gap:6px"><button class="small" name="one" value="${st}:${r.sample_id}" title="${quick.STEP_INFO[st].hint}">${quick.STEP_INFO[st].label}</button>
+${st === 'courier' && isStaff(u) ? html`<button class="small light" name="one" value="receive:${r.sample_id}" title="It came to the lab by hand">Reached lab</button>` : ''}</div>`;
+      if (r.received_at && r.account_type !== 'main' && u.role !== 'counsellor') return html`<a class="btn small light" href="/receipts/${r.account_id}/${istDate(new Date(r.received_at))}" target="_blank">${icon('print')}Acknowledgement</a>`;
+      if (['PICKUP_SCHEDULED', 'IN_TRANSIT_TO_LAB'].includes(r.status)) return html`<span class="muted">With the courier</span>`;
+      if (r.status === 'COLLECTED' && u.role === 'partner') return html`<span class="muted">Waiting for courier</span>`;
+      return '';
+    };
     h.send(ctx, title, html`<div class="head"><div><h1>${title}</h1><p class="sub">${q ? html`Results for “${q}” · ` : ''}${rows.length} shown${rows.length === 200 ? ' (latest 200)' : ''}</p></div>
-${samples.canRegister(u) ? html`<a class="btn" href="/samples/new">${icon('plus')}Register a sample</a>` : ''}</div>
-<div class="chips"><a class="chip ${!phase && !status ? 'on' : ''}" href="${link({})}">All<span>${all}</span></a>
+${samples.canRegister(u) ? html`<div class="actions" style="margin:0"><a class="btn light" href="/samples/bulk">${icon('upload')}Upload from Excel</a><a class="btn" href="/samples/new">${icon('plus')}Register a sample</a></div>` : ''}</div>
+<div class="chips"><a class="chip ${todo ? 'on' : ''}" href="${link({ todo: '1' })}">Waiting for me<span>${todoCount}</span></a><a class="chip ${!phase && !status && !todo ? 'on' : ''}" href="${link({})}">All<span>${all}</span></a>
 ${journey.PHASES.filter((p) => cnt(p.statuses) || phase === p).map((p) => html`<a class="chip ${phase === p && !status ? 'on' : ''}" href="${link({ phase: p.key })}">${p.label}<span>${cnt(p.statuses)}</span></a>`)}
 ${journey.EXCEPTIONS.filter((k) => byStatus[k] || status === k).map((k) => html`<a class="chip ${status === k ? 'on' : ''}" href="${link({ status: k })}">${samples.STATUSES[k]}<span>${byStatus[k] || 0}</span></a>`)}
 ${status && !journey.EXCEPTIONS.includes(status) ? html`<a class="chip on" href="${link({ status })}">${samples.STATUSES[status]}<span>${byStatus[status] || 0}</span></a>` : ''}</div>
@@ -126,13 +156,48 @@ ${status && !journey.EXCEPTIONS.includes(status) ? html`<a class="chip on" href=
 <input name="q" value="${q}" placeholder="Sample ID, name, mobile or reference" aria-label="Search">
 ${isStaff(u) ? html`<select name="account" aria-label="Registered by"><option value="">All accounts</option>${accounts.map((a) => html`<option value="${a.id}" ${String(a.id) === ctx.query.account ? raw('selected') : ''}>${a.name}</option>`)}</select>` : ''}
 <button class="light">Apply</button>${q || ctx.query.account ? html`<a class="btn light" href="${link({}).replace(/\?.*/, '')}">Clear</a>` : ''}</form>
-<div class="table-wrap"><table class="stack"><thead><tr><th>Sample ID</th><th>${u.role === 'counsellor' ? 'Client' : 'Patient'}</th><th>Test</th>${isStaff(u) ? html`<th>Registered by</th>` : ''}<th>Status</th><th>Registered</th>${u.role === 'counsellor' ? '' : html`<th class="num">Billed</th>`}</tr></thead><tbody>
-${rows.map((r) => html`<tr data-href="/samples/${r.sample_id}"><td><a class="mono" href="/samples/${r.sample_id}">${r.sample_id}</a></td>
-<td><b>${r.full_name}</b><br><span class="muted">${[r.gender, age(r.dob), r.city].filter(Boolean).join(' · ')}</span></td><td>${r.test_name}</td>
-${isStaff(u) ? html`<td>${r.account_name}${r.partner_ref ? html`<br><span class="muted">Ref ${r.partner_ref}</span>` : ''}</td>` : ''}<td>${statusPill(r.status, samples.STATUSES[r.status])}</td><td class="nw">${fmtDate(r.registered_at)}<br><span class="muted">${r.mobile}</span></td>
+${courierBanner(ctx)}
+${canStep ? raw('<form method="post" action="/samples/quick" id="quick">') : ''}${canStep ? html`<input type="hidden" name="back" value="${link({ ...(phase && !status ? { phase: phase.key } : {}), ...(status ? { status } : {}), ...(todo ? { todo: '1' } : {}) })}">` : ''}
+${canStep && offered.length ? html`<div class="card noprint" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:10px 14px"><span class="muted">Tick samples, then:</span>
+${offered.map((st) => html`<button class="small light" name="do" value="${st}">${quick.STEP_INFO[st].label}</button>`)}<span class="muted" style="font-size:12px">Or use the button on each row.</span></div>` : ''}
+<div class="table-wrap"><table class="stack"><thead><tr>${canStep && offered.length ? html`<th style="width:28px"><input type="checkbox" aria-label="Tick all" onclick="document.querySelectorAll('input[name=\'samples[]\']').forEach(function(c){c.checked=this.checked}.bind(this))"></th>` : ''}<th>Sample ID</th><th>${u.role === 'counsellor' ? 'Client' : 'Patient'}</th><th>Test</th>${isStaff(u) ? html`<th>Registered by</th>` : ''}<th>Status</th>${canStep ? html`<th>Next step</th>` : html`<th>Registered</th>`}${u.role === 'counsellor' ? '' : html`<th class="num">Billed</th>`}</tr></thead><tbody>
+${rows.map((r, i) => html`<tr data-href="/samples/${r.sample_id}">${canStep && offered.length ? html`<td>${quick.STEPS.includes(steps[i]) ? html`<input type="checkbox" name="samples[]" value="${r.sample_id}" aria-label="Tick ${r.sample_id}">` : ''}</td>` : ''}<td><a class="mono" href="/samples/${r.sample_id}">${r.sample_id}</a>${canStep ? html`<br><span class="muted">${fmtDate(r.registered_at)}</span>` : ''}</td>
+<td><b>${r.full_name}</b><br><span class="muted">${[r.gender, age(r), r.city].filter(Boolean).join(' · ')}</span></td><td>${r.test_name}</td>
+${isStaff(u) ? html`<td>${r.account_name}${r.partner_ref ? html`<br><span class="muted">Ref ${r.partner_ref}</span>` : ''}</td>` : ''}<td>${statusPill(r.status, samples.STATUSES[r.status])}</td>${canStep ? html`<td class="nw">${stepCell(r, steps[i])}</td>` : html`<td class="nw">${fmtDate(r.registered_at)}<br><span class="muted">${r.mobile}</span></td>`}
 ${u.role === 'counsellor' ? '' : html`<td class="num">${r.net_paise == null ? '' : rupees(r.net_paise)}${r.bill_status === 'reversed' ? html`<br><span class="pill">reversed</span>` : ''}</td>`}</tr>`)}
-${rows.length ? '' : html`<tr><td colspan="7"><div class="empty">${icon('search')}No samples match.${samples.canRegister(u) && !q ? html` <a href="/samples/new">Register the first one</a>.` : ''}</div></td></tr>`}</tbody></table></div>`);
+${rows.length ? '' : html`<tr><td colspan="9"><div class="empty">${icon('search')}No samples match.${samples.canRegister(u) && !q ? html` <a href="/samples/new">Register the first one</a>.` : ''}</div></td></tr>`}</tbody></table></div>${canStep ? raw('</form>') : ''}`);
   });
+
+  router.post('/samples/quick', (ctx) => {
+    const b = ctx.body;
+    const [step, one] = b.one ? String(b.one).split(':') : [b.do, null];
+    const back = /^\/samples(\?|$|\/[A-Za-z0-9-]+$)/.test(b.back || '') ? b.back : '/samples';
+    const r = quick.run(db, ctx.user, step, one || b.samples);
+    const parts = [];
+    if (r.done.length) parts.push(`${r.done.length === 1 ? r.done[0] : `${r.done.length} samples`} ${STEP_DONE[step]}.`);
+    if (step === 'receive' && r.done.length) parts.push('The TAT clock has started and the partner has been sent the receipt acknowledgement link.');
+    for (const s of r.skipped) parts.push(`${s.id}: ${s.why}`);
+    const to = r.messages.length ? `${back}${back.includes('?') ? '&' : '?'}msg=${r.messages.join(',')}` : back;
+    h.redirect(ctx, to, { type: r.skipped.length ? (r.done.length ? 'warn' : 'error') : 'ok', text: parts.join(' ') || 'Nothing to do.' });
+  });
+
+  // Patient fields shared by registration and editing. Only name, gender and
+  // age are compulsory; a date of birth, when entered, fills the age in.
+  function patientFields(v) {
+    return html`${field('Full name', 'full_name', v('full_name'), { required: true })}
+${select('Gender', 'gender', samples.GENDERS, v('gender'), { required: true })}
+${field('Age (years)', 'age_years', v('age_years'), { type: 'number', required: true, attrs: 'min="0" max="120" step="1" inputmode="numeric"' })}
+${field('Date of birth', 'dob', v('dob'), { type: 'date', opt: true, attrs: `max="${istDate()}"` })}
+${field('Mobile (WhatsApp)', 'mobile', v('mobile'), { opt: true, attrs: 'inputmode="numeric" placeholder="10 digits"' })}
+${field('Email', 'email', v('email'), { type: 'email', opt: true })}
+${field('Address', 'address', v('address'), { opt: true })}
+${field('City', 'city', v('city'), { opt: true })}
+${select('State', 'state', samples.STATES, v('state'), { opt: true })}
+${field('Pincode', 'pincode', v('pincode'), { opt: true, attrs: 'inputmode="numeric"' })}
+<script>(function(){var d=document.getElementById('dob'),a=document.getElementById('age_years');if(!d||!a)return;
+function f(){if(!d.value)return;var b=d.value.split('-').map(Number),t=new Date(),y=t.getFullYear()-b[0];if(t.getMonth()+1<b[1]||(t.getMonth()+1===b[1]&&t.getDate()<b[2]))y--;if(y>=0)a.value=y}
+d.addEventListener('change',f)})()</script>`;
+  }
 
   // ---------- Registration ----------
   function registrationForm(ctx, values = {}, duplicate = null) {
@@ -147,8 +212,9 @@ ${rows.length ? '' : html`<tr><td colspan="7"><div class="empty">${icon('search'
     const kind = account.type;
     h.send(ctx, 'Register a sample', html`<h1>Register a sample</h1>
 <p class="sub">Registering for <b>${account.name}</b>. ${kind === 'partner' ? html`Credit balance: <b class="${bal < 0 ? 'neg' : ''}">${rupees(bal)}</b>. The test price is deducted when you save.` : ''}
-${kind === 'supplier' ? 'You bill the patient under your own company name and GST number.' : ''}${kind === 'main' ? 'Direct registration at our standard price.' : ''}</p>
-${duplicate ? html`<div class="flash warn">This looks like a repeat: the same mobile, date of birth and test were registered as <b>${duplicate.sample_id}</b> on ${fmtDate(duplicate.registered_at)}. To register again, give a reason below and save.</div>` : ''}
+${kind === 'supplier' ? 'You bill the patient under your own company name and GST number.' : ''}${kind === 'main' ? 'Direct registration at our standard price.' : ''}
+Registering many? <a href="/samples/bulk">Upload an Excel sheet</a>.</p>
+${duplicate ? html`<div class="flash warn">This looks like a repeat: the same mobile, patient and test were registered as <b>${duplicate.sample_id}</b> on ${fmtDate(duplicate.registered_at)}. To register again, give a reason below and save.</div>` : ''}
 <form method="post" action="/samples/new">
 <div class="card"><h2 style="margin-top:0">Test</h2><div class="grid">
 ${select('Test', 'test_id', priced.filter((t) => t.price != null).map((t) => [t.id, `${t.name} (${rupees(t.price)})`]), v('test_id'), { required: true })}
@@ -156,15 +222,7 @@ ${field('Your reference number', 'partner_ref', v('partner_ref'), { opt: true })
 ${field('Referring doctor', 'referring_doctor', v('referring_doctor'), { opt: true })}
 </div></div>
 <div class="card"><h2 style="margin-top:0">Patient</h2><div class="grid">
-${field('Full name', 'full_name', v('full_name'), { required: true })}
-${select('Gender', 'gender', samples.GENDERS, v('gender'), { required: true })}
-${field('Date of birth', 'dob', v('dob'), { type: 'date', required: true, attrs: `max="${istDate()}"` })}
-${field('Mobile (WhatsApp)', 'mobile', v('mobile'), { required: true, attrs: 'inputmode="numeric" placeholder="10 digits"' })}
-${field('Email', 'email', v('email'), { type: 'email', opt: true })}
-${field('Address', 'address', v('address'), { opt: true })}
-${field('City', 'city', v('city'), { required: true })}
-${select('State', 'state', samples.STATES, v('state'), { required: true })}
-${field('Pincode', 'pincode', v('pincode'), { required: true, attrs: 'inputmode="numeric"' })}
+${patientFields(v)}
 </div><div style="margin-top:12px"><label for="clinical_notes">Clinical notes <span class="opt">(optional)</span></label><textarea id="clinical_notes" name="clinical_notes">${v('clinical_notes')}</textarea></div></div>
 ${kind === 'supplier' ? html`<div class="card"><h2 style="margin-top:0">Your bill to the patient</h2><div class="grid">
 ${field('Your price to the patient (₹)', 'patient_price', v('patient_price'), { required: true, attrs: 'inputmode="decimal"' })}
@@ -172,18 +230,24 @@ ${field('Your discount (₹)', 'patient_discount', v('patient_discount', '0'), {
 ${select('GST rate on your bill', 'gst_rate', GST_RATES, v('gst_rate', '1800'), { required: true })}
 </div><p class="muted" style="margin-bottom:0">Your discount changes only your bill to the patient. MyDNAPedia's transfer price to you stays the same.</p></div>` : ''}
 ${kind === 'main' ? html`<div class="card"><h2 style="margin-top:0">Payment</h2><div class="grid">
-${select('Paid by', 'payment_mode', PAY_MODES, v('payment_mode'), { required: true })}
+${select('Paid by', 'payment_mode', PAY_MODES, v('payment_mode'), { opt: true, placeholder: 'Payment pending' })}
 ${field('Payment reference', 'payment_ref', v('payment_ref'), { opt: true })}
 ${u.role === 'admin' ? field('Discount (₹)', 'discount', v('discount', '0'), { attrs: 'inputmode="decimal"' }) : ''}
 </div></div>` : ''}
 <div class="card"><h2 style="margin-top:0">Consent</h2>
-<label class="check"><input type="checkbox" name="consent_testing" value="yes" ${v('consent_testing') === 'yes' ? raw('checked') : ''} required> The patient agrees to this genetic test and to MyDNAPedia processing their sample and data for it.</label>
+<label class="check"><input type="checkbox" name="consent_testing" value="yes" ${v('consent_testing') === 'yes' ? raw('checked') : ''}> The patient agrees to this genetic test and to MyDNAPedia processing their sample and data for it.</label>
 <label class="check"><input type="checkbox" name="consent_data_use" value="yes" ${v('consent_data_use') === 'yes' ? raw('checked') : ''}> The patient also agrees that their anonymised data may be used to improve our services. <span class="muted">(optional)</span></label>
-<div class="grid" style="margin-top:8px">${select('How was consent taken?', 'consent_method', ['Signed form', 'Confirmed verbally by patient'], v('consent_method'), { required: true })}</div></div>
+<div class="grid" style="margin-top:8px">${select('How was consent taken?', 'consent_method', ['Signed form', 'Confirmed verbally by patient'], v('consent_method'), { opt: true })}</div></div>
+${isStaff(u) ? html`<details class="card" ${v('past_registered') ? raw('open') : ''}><summary><b>Old sample?</b> <span class="muted">Already collected and received in the past, entered in the LIMS now</span></summary>
+<p class="muted">Give the real dates. The sample goes straight to "Received at lab" with those dates, the TAT counts from the receipt date, and no messages go to the patient or partner. Put your old sample number in "Your reference number" if it had one. Leave the Collection section below empty.</p>
+<div class="grid">${field('Registered on', 'past_registered', v('past_registered'), { type: 'date', attrs: `max="${istDate()}"` })}
+${field('Collected on', 'past_collected', v('past_collected'), { type: 'date', opt: true, attrs: `max="${istDate()}"` })}
+${field('Received at the lab on', 'past_received', v('past_received'), { type: 'date', opt: true, attrs: `max="${istDate()}"` })}</div>
+<p class="muted" style="margin-bottom:0">Collected on empty means the same day as registered. Received empty leaves it at "Collected".</p></details>` : ''}
 <div class="card"><h2 style="margin-top:0">Collection</h2>
-<label class="check"><input type="checkbox" name="collected_now" value="yes" ${v('collected_now') === 'yes' ? raw('checked') : ''}> The sample is being collected and labelled now.</label>
-<div class="grid">${field('Collected by', 'collector', v('collector'), { opt: true })}</div>
-<p class="muted" style="margin-bottom:0">If the sample is collected later, leave this unticked and mark it collected from the sample's page.</p></div>
+<label class="check"><input type="checkbox" name="collected_now" value="yes" ${v('collected_now') === 'yes' ? raw('checked') : ''}> The sample is already collected (now or earlier).</label>
+<div class="grid">${field('Collected by', 'collector', v('collector'), { opt: true })}${field('Collection date and time', 'collected_at', v('collected_at'), { type: 'datetime-local', opt: true, attrs: `max="${maxLocal()}"` })}</div>
+<p class="muted" style="margin-bottom:0">Leave the date empty if it is being collected now. Registering late? Enter the real collection date, up to 30 days back. If the sample is collected later, leave this unticked and mark it collected from the sample's page.</p></div>
 ${duplicate ? html`<div class="card">${field('Reason for registering again', 'duplicate_reason', v('duplicate_reason'), { required: true })}</div>` : ''}
 <div class="actions"><button>Save registration</button><a href="/samples">Cancel</a></div></form>`);
   }
@@ -201,14 +265,23 @@ ${duplicate ? html`<div class="card">${field('Reason for registering again', 'du
       input.supplier = { patientPricePaise: toPaise(b.patient_price), discountPaise: b.patient_discount ? toPaise(b.patient_discount) : 0, gstRateBp: Number(b.gst_rate) || 0 };
     }
     if (ctx.user.role !== 'partner') {
-      input.direct = { paymentMode: b.payment_mode, paymentRef: b.payment_ref, discountPaise: b.discount ? toPaise(b.discount) : 0 };
+      input.direct = { paymentMode: b.payment_mode || 'pending', paymentRef: b.payment_ref, discountPaise: b.discount ? toPaise(b.discount) : 0 };
     }
-    const out = samples.register(db, ctx.user, input);
+    const old = String(b.past_registered || '').trim();
+    const out = old ? past.register(db, ctx.user, input) : samples.register(db, ctx.user, input);
     if (out.duplicate) {
       ctx.flash = null;
       return registrationForm(ctx, b, out.duplicate);
     }
-    h.redirect(ctx, `/samples/${out.sample.sample_id}`, { type: 'ok', text: `Registered. Sample ID ${out.sample.sample_id}. Print the label and stick it on the tube.` });
+    h.redirect(ctx, `/samples/${out.sample.sample_id}`, { type: 'ok', text: old ? `Old sample registered as ${out.sample.sample_id} with its past dates. No messages were sent.` : `Registered. Sample ID ${out.sample.sample_id}. Print the label and stick it on the tube.` });
+  });
+
+  // Labels for several samples at once (after an Excel upload).
+  router.get('/samples/labels', (ctx) => {
+    const ids = String(ctx.query.ids || '').split(',').map((x) => x.trim()).filter(Boolean).slice(0, 500);
+    if (!ids.length) throw new UserError('No samples were chosen.');
+    const copies = labelCopies(ctx);
+    labelSheet(ctx, ids.map((id) => loadFull({ ...ctx, params: { id } })), copies, `?ids=${encodeURIComponent(ids.join(','))}&copies=${copies + 1}`);
   });
 
   // ---------- Sample page ----------
@@ -230,19 +303,21 @@ ${duplicate ? html`<div class="card">${field('Reason for registering again', 'du
     const early = samples.BEFORE_LAB.includes(s.status);
     const canCancel = !['CANCELLED', 'CLOSED', 'DELIVERED'].includes(s.status) && (early ? u.role !== 'counsellor' : u.role === 'admin');
     const patientCard = html`<div class="card"><h2>${u.role === 'counsellor' ? 'Client' : 'Patient'}</h2><dl class="facts">
-<dt>Name</dt><dd>${p.full_name}</dd><dt>Gender</dt><dd>${p.gender}</dd><dt>Date of birth</dt><dd>${fmtDate(p.dob)}</dd>
-<dt>Mobile</dt><dd>${p.mobile}</dd><dt>Email</dt><dd>${p.email || '—'}</dd><dt>Address</dt><dd>${[p.address, p.city, p.state, p.pincode].filter(Boolean).join(', ')}</dd>
-<dt>Consent</dt><dd>Test: yes · Data use: ${s.consent_data_use ? 'yes' : 'no'} · ${s.consent_method}</dd>
+<dt>Name</dt><dd>${p.full_name}</dd><dt>Gender</dt><dd>${p.gender}</dd><dt>Age</dt><dd>${samples.patientAge(p) ?? '—'}${p.dob ? ` (born ${fmtDate(p.dob)})` : ''}</dd>
+<dt>Mobile</dt><dd>${p.mobile || '—'}</dd><dt>Email</dt><dd>${p.email || '—'}</dd><dt>Address</dt><dd>${[p.address, p.city, p.state, p.pincode].filter(Boolean).join(', ') || '—'}</dd>
+<dt>Consent</dt><dd>Test: ${s.consent_testing ? 'yes' : 'not recorded'} · Data use: ${s.consent_data_use ? 'yes' : 'no'}${s.consent_method ? ` · ${s.consent_method}` : ''}</dd>
 ${s.clinical_notes ? html`<dt>Clinical notes</dt><dd>${s.clinical_notes}</dd>` : ''}</dl></div>`;
     const sampleCard = html`<div class="card"><h2>Sample</h2><dl class="facts">
 <dt>Test</dt><dd>${t.name}</dd><dt>Sample type</dt><dd>${t.sample_type}</dd>
 ${isStaff(u) ? html`<dt>Processing</dt><dd>${ROUTE_LABEL[t.route]} · TAT ${t.tat_days} days from lab receipt</dd>` : ''}
 <dt>Registered by</dt><dd>${a.name} · ${regBy ? regBy.name : ''}</dd><dt>Registered</dt><dd>${fmtDateTime(s.registered_at)}</dd>
 <dt>Collected</dt><dd>${s.collected_at ? html`${fmtDateTime(s.collected_at)} by ${s.collector}` : 'Not yet'}</dd>
+<dt>Patient tracking</dt><dd><a href="${track.link(s.sample_id)}" target="_blank" rel="noopener">${track.link(s.sample_id)}</a><br><small class="muted">The patient opens it with the last 4 digits of their mobile. It is in their registration message.</small></dd>
 ${s.partner_ref ? html`<dt>Reference</dt><dd>${s.partner_ref}</dd>` : ''}${s.referring_doctor ? html`<dt>Doctor</dt><dd>${s.referring_doctor}</dd>` : ''}
 ${s.duplicate_reason ? html`<dt>Repeat reason</dt><dd>${s.duplicate_reason}</dd>` : ''}${s.cancel_reason ? html`<dt>Cancelled</dt><dd>${s.cancel_reason}</dd>` : ''}</dl>
 ${s.status === 'REGISTERED' && u.role !== 'counsellor' ? html`<form method="post" action="/samples/${s.sample_id}/collect" class="noprint" style="margin-top:16px;border-top:1px solid var(--line);padding-top:14px">
-<b>Mark as collected</b><div class="grid" style="margin-top:10px">${field('Collected by', 'collector', '', { required: true })}${field('Date and time', 'collected_at', '', { type: 'datetime-local', required: true })}</div>
+<b>Mark as collected</b><div class="grid" style="margin-top:10px">${field('Collected by', 'collector', '', { opt: true })}${field('Date and time', 'collected_at', '', { type: 'datetime-local', opt: true, attrs: `max="${maxLocal()}"` })}</div>
+<p class="muted" style="margin:0">Empty fields mean you, now.</p>
 <div class="actions"><button>Mark collected</button></div></form>` : ''}</div>`;
     const billingCard = u.role === 'counsellor' ? '' : html`<div class="card"><h2>Billing</h2>${bill ? html`<dl class="facts">
 <dt>Bill number</dt><dd class="mono">${bill.bill_no}</dd>
@@ -264,15 +339,49 @@ ${sbill ? html`<dt>Patient bill</dt><dd>${sbill.bill_no}: ${rupees(sbill.patient
 <div class="actions noprint" style="margin:0"><a class="btn light" href="/samples/${s.sample_id}/label" target="_blank">${icon('print')}Label</a>${u.role === 'counsellor' ? '' : html`<a class="btn light" href="/samples/${s.sample_id}/bill" target="_blank">${icon('print')}Bill</a>`}
 ${samples.canEditPatient(u, s) && s.status !== 'CANCELLED' ? html`<a class="btn light" href="/samples/${s.sample_id}/edit">Edit patient</a>` : ''}</div></div>
 ${s.status === 'CANCELLED' ? '' : html`<div class="steps" aria-label="Progress">${steps.map((st, i) => html`<div class="step ${st.state} ${i === 0 ? 'first' : ''}">${st.label}</div>`)}</div>`}
+${courierBanner(ctx)}${nextCard(u, s, t, a)}
 <div class="detail"><div>
 ${sampleCard}
 ${isStaff(u) ? trackingCard(s, t) : ''}
+${u.role === 'partner' ? receiptCard(s) : ''}
 ${isStaff(u) ? h.reportCard(u, s, t) : ''}
 ${h.counsellingCard(u, s, t)}
 </div><div>
 ${patientCard}${billingCard}${timelineCard}${cancelCard}
 </div></div>`);
   });
+
+  // After a one-click courier booking: the courier's WhatsApp message, ready to open.
+  function courierBanner(ctx) {
+    const ids = String(ctx.query.msg || '').split(',').map(Number).filter(Boolean);
+    const msgs = ids.length ? db.all(`SELECT id FROM notifications WHERE status = 'pending' AND id IN (${ids.map(() => '?').join(',')})`, ...ids) : [];
+    if (!msgs.length) return '';
+    return html`<div class="flash ok">${icon('check')}<div>Courier booked. Send the courier ${msgs.length === 1 ? 'its message' : `their ${msgs.length} messages (one per location)`} on WhatsApp:
+${msgs.map((m) => html`<form method="post" action="/outbox/${m.id}/open" target="_blank" style="display:inline"><button class="small">${icon('outbox')}Send WhatsApp to courier</button></form> `)}</div></div>`;
+  }
+
+  // The one thing to do next for this sample, the same step as on the list.
+  function nextCard(u, s, t, a) {
+    const st = quick.nextStep(u, { ...s, route: t.route, account_type: a.type });
+    if (!st) return '';
+    const info = quick.STEP_INFO[st];
+    const button = quick.STEPS.includes(st)
+      ? html`<form method="post" action="/samples/quick" style="margin:0"><input type="hidden" name="back" value="/samples/${s.sample_id}"><button name="one" value="${st}:${s.sample_id}">${info.label}</button></form>`
+      : html`<a class="btn" href="${quick.stepHref(st, s.sample_id)}">${info.label}</a>`;
+    return html`<div class="card noprint" style="display:flex;gap:14px;align-items:center;justify-content:space-between;flex-wrap:wrap;border-color:var(--accent,#f9b300)">
+<div><b>Next step</b><br><span class="muted">${info.hint}</span></div>${button}</div>`;
+  }
+
+  // The partner's view of the central lab receipt, with its acknowledgement.
+  function receiptCard(s) {
+    if (!s.received_at) return html`<div class="card"><h2 style="margin-top:0">Lab receipt</h2><p class="muted" style="margin:0">Not received at the central lab yet. You will get an acknowledgement when it arrives.</p></div>`;
+    const ok = s.receipt_condition === 'Acceptable';
+    return html`<div class="card"><h2 style="margin-top:0">Lab receipt</h2><dl class="facts">
+<dt>Received</dt><dd>${fmtDateTime(s.received_at)}</dd>
+<dt>Condition</dt><dd>${ok ? html`<span class="pill good">Accepted</span>` : html`<span class="pill bad">Rejected</span> ${s.reject_reason}`}</dd>
+${ok && s.tat_due_at ? html`<dt>Expected report</dt><dd>${fmtDate(s.tat_due_at)}</dd>` : ''}</dl>
+<div class="actions" style="margin-bottom:0"><a class="btn light" href="/receipts/${s.account_id}/${istDate(new Date(s.received_at))}" target="_blank">${icon('print')}Receipt acknowledgement</a></div></div>`;
+  }
 
   // Tracking facts and the next lab action for staff.
   function trackingCard(s, t) {
@@ -283,7 +392,7 @@ ${patientCard}${billingCard}${timelineCard}${cancelCard}
     const today = istDate();
     return html`<div class="card"><h2 style="margin-top:0">Tracking</h2><dl class="facts">
 ${ship.map((x) => html`<dt>${x.leg === 1 ? 'Pickup' : 'Onward dispatch'}</dt><dd><a class="mono" href="/tracking/shipments/${x.id}">${x.shipment_no}</a> · ${x.status.replace('_', ' ')}</dd>`)}
-${s.received_at ? html`<dt>Lab receipt</dt><dd>${fmtDateTime(s.received_at)} · ${s.receipt_condition}</dd>` : ''}
+${s.received_at ? html`<dt>Lab receipt</dt><dd>${fmtDateTime(s.received_at)} · ${s.receipt_condition} · <a href="/receipts/${s.account_id}/${istDate(new Date(s.received_at))}">Acknowledgement</a></dd>` : ''}
 ${s.tat_due_at && s.released_at ? html`<dt>TAT due</dt><dd>${fmtDate(s.tat_due_at)} · <span class="pill ${s.tat_met ? 'good' : 'bad'}">${s.tat_met ? 'report released within TAT' : 'report released late'}</span></dd>` : ''}
 ${s.tat_due_at && !s.released_at ? html`<dt>TAT due</dt><dd>${fmtDate(s.tat_due_at)} · <span class="pill ${tat.paused ? '' : { green: 'good', amber: 'warn', red: 'bad' }[tat.level]}">${tat.paused ? 'paused' : tat.level === 'red' ? 'overdue' : `${tat.daysLeft.toFixed(1)} days left`}</span></dd>` : ''}
 ${s.partner_received_at ? html`<dt>Partner lab receipt</dt><dd>${fmtDate(s.partner_received_at)}${s.partner_lab_ref ? ` · ref ${s.partner_lab_ref}` : ''}</dd>` : ''}
@@ -293,13 +402,11 @@ ${original ? html`<dt>Recollection of</dt><dd><a class="mono" href="/samples/${o
 ${recollection ? html`<dt>Fresh sample</dt><dd><a class="mono" href="/samples/${recollection.sample_id}">${recollection.sample_id}</a></dd>` : ''}
 ${!ship.length && !s.received_at ? html`<dt>Next step</dt><dd>${['REGISTERED', 'COLLECTED'].includes(s.status) ? 'Waiting for pickup or lab receipt' : '—'}</dd>` : ''}</dl>
 <div class="actions noprint">
-${s.status === 'RECEIVED_AT_LAB' && t.route === 'in_house' ? html`<form method="post" action="/samples/${s.sample_id}/start-in-house"><button>Start in-house processing</button></form>` : ''}
-${s.status === 'RECEIVED_AT_LAB' && t.route === 'partner_lab' ? html`<a class="btn" href="/tracking/onward">Send to partner lab</a>` : ''}
 ${s.status === 'REJECTED' && !recollection ? html`<form method="post" action="/samples/${s.sample_id}/recollect"><button>Register fresh sample (no charge)</button></form>` : ''}
 ${s.status === 'ON_HOLD' ? html`<form method="post" action="/samples/${s.sample_id}/release"><button>Release hold</button></form>` : ''}</div>
-${['IN_TRANSIT_TO_PARTNER', 'DISPATCH_TO_PARTNER_SCHEDULED'].includes(s.status) ? html`<form method="post" action="/samples/${s.sample_id}/partner-received" class="noprint" style="margin-top:12px"><input type="hidden" name="back" value="sample">
-<b>Partner lab received it</b><div class="grid" style="margin-top:8px">${field('Date received', 'received_on', today, { type: 'date', required: true, attrs: `max="${today}"` })}${field('Their reference', 'ref', '', { opt: true })}</div>
-<div class="actions"><button>Mark received at partner lab</button></div></form>` : ''}
+${['IN_TRANSIT_TO_PARTNER', 'DISPATCH_TO_PARTNER_SCHEDULED'].includes(s.status) ? html`<details class="noprint" style="margin-top:12px"><summary>Partner lab received it on another day, or gave a reference</summary><form method="post" action="/samples/${s.sample_id}/partner-received"><input type="hidden" name="back" value="sample">
+<div class="grid" style="margin-top:8px">${field('Date received', 'received_on', today, { type: 'date', required: true, attrs: `max="${today}"` })}${field('Their reference', 'ref', '', { opt: true })}</div>
+<div class="actions"><button class="light">Mark received at partner lab</button></div></form></details>` : ''}
 ${!['ON_HOLD', 'CANCELLED', 'CLOSED', 'DELIVERED', 'REJECTED', 'RECOLLECTION_REQUESTED'].includes(s.status) ? html`<details class="noprint" style="margin-top:12px"><summary>Put on hold</summary>
 <form method="post" action="/samples/${s.sample_id}/hold"><div class="grid">${field('Reason', 'reason', '', { required: true })}</div><div class="actions"><button class="light">Put on hold</button></div></form></details>` : ''}</div>`;
   }
@@ -319,16 +426,12 @@ ${!['ON_HOLD', 'CANCELLED', 'CLOSED', 'DELIVERED', 'REJECTED', 'RECOLLECTION_REQ
     h.send(ctx, 'Edit patient', html`<p><a href="/samples/${ctx.params.id}">← ${ctx.params.id}</a></p><h1>Edit patient details</h1>
 <p class="sub">Every change is recorded in the audit trail with the old value.</p>
 <form method="post" class="card"><div class="grid">
-${field('Full name', 'full_name', v('full_name'), { required: true })}${select('Gender', 'gender', samples.GENDERS, v('gender'), { required: true })}
-${field('Date of birth', 'dob', v('dob'), { type: 'date', required: true })}${field('Mobile (WhatsApp)', 'mobile', v('mobile'), { required: true })}
-${field('Email', 'email', v('email'), { type: 'email', opt: true })}${field('Address', 'address', v('address'), { opt: true })}
-${field('City', 'city', v('city'), { required: true })}${select('State', 'state', samples.STATES, v('state'), { required: true })}
-${field('Pincode', 'pincode', v('pincode'), { required: true })}</div><div class="actions"><button>Save changes</button></div></form>`);
+${patientFields(v)}</div><div class="actions"><button>Save changes</button></div></form>`);
   }
   router.get('/samples/:id/edit', (ctx) => {
     const { s, p } = loadFull(ctx);
     if (!samples.canEditPatient(ctx.user, s)) throw new UserError('Patient details can no longer be changed from your account. Contact the lab.');
-    editForm(ctx, p);
+    editForm(ctx, { ...p, age_years: samples.patientAge(p) ?? '' });
   });
   router.post('/samples/:id/edit', (ctx) => {
     ctx.retry = (msg) => { ctx.flash = { type: 'error', text: msg }; editForm(ctx, ctx.body); };
@@ -338,20 +441,27 @@ ${field('Pincode', 'pincode', v('pincode'), { required: true })}</div><div class
 
   // ---------- Label ----------
   // 50 x 25 mm label; prints on a label printer or on plain paper.
-  router.get('/samples/:id/label', (ctx) => {
-    const { s, p, t } = loadFull(ctx);
-    const initials = p.full_name.split(/\s+/).map((w) => w[0]).join('').toUpperCase().slice(0, 4);
-    const copies = Math.min(Math.max(Number(ctx.query.copies) || 2, 1), 6);
-    const label = html`<div class="label"><div class="bc">${raw(barcode.svg(s.sample_id, { height: 46 }))}</div>
+  // Labels: 50 x 25 mm, two per sample by default (tube and form).
+  function labelSheet(ctx, list, copies, more) {
+    const one = ({ s, p, t }) => {
+      const initials = p.full_name.split(/\s+/).map((w) => w[0]).join('').toUpperCase().slice(0, 4);
+      return html`<div class="label"><div class="bc">${raw(barcode.svg(s.sample_id, { height: 46 }))}</div>
 <div class="id">${s.sample_id}</div><div class="meta"><span>${t.short_name}</span><span>${initials} · ${fmtDate(s.registered_at)}</span></div></div>`;
-    h.raw(ctx, 'text/html; charset=utf-8', html`<!doctype html><html><head><meta charset="utf-8"><title>Label ${s.sample_id}</title><style>
+    };
+    h.raw(ctx, 'text/html; charset=utf-8', html`<!doctype html><html><head><meta charset="utf-8"><title>Label${list.length > 1 ? `s (${list.length} samples)` : ` ${list[0].s.sample_id}`}</title><style>
 @page{size:50mm 25mm;margin:0}body{margin:0;font-family:Arial,sans-serif}
 .label{width:50mm;height:25mm;padding:1.5mm 2mm;box-sizing:border-box;page-break-after:always;overflow:hidden}
 .bc svg{width:46mm;height:12mm;display:block}.id{font:bold 9pt monospace;text-align:center;margin-top:.5mm}
 .meta{display:flex;justify-content:space-between;font-size:6.5pt;margin-top:.3mm}
 .bar{font:14px system-ui;padding:10px;background:#f5f8f9;border-bottom:1px solid #ddd}@media print{.bar{display:none}}
-</style></head><body><div class="bar">Label size 50 × 25 mm. <a href="?copies=${copies + 1}">More copies</a> · <button onclick="print()">Print</button></div>
-${Array.from({ length: copies }, () => label)}<script>setTimeout(()=>print(),300)</script></body></html>`.toString());
+</style></head><body><div class="bar">Label size 50 × 25 mm${list.length > 1 ? ` · ${list.length} samples, ${copies} each` : ''}. <a href="${more}">More copies</a> · <button onclick="print()">Print</button></div>
+${list.map((x) => Array.from({ length: copies }, () => one(x)))}<script>setTimeout(()=>print(),300)</script></body></html>`.toString());
+  }
+  const labelCopies = (ctx) => Math.min(Math.max(Number(ctx.query.copies) || 2, 1), 6);
+
+  router.get('/samples/:id/label', (ctx) => {
+    const copies = labelCopies(ctx);
+    labelSheet(ctx, [loadFull(ctx)], copies, `?copies=${copies + 1}`);
   });
 
   // ---------- Bill ----------

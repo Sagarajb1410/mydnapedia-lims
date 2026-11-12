@@ -21,4 +21,6 @@ module.exports = {
   secureCookies: process.env.SECURE_COOKIES === '1' || process.env.LIMS_STAGE === 'live',
   timeZone: 'Asia/Kolkata',
   sessionHours: 12,
+  // The address patients use for the tracking link in messages.
+  publicUrl: (process.env.PUBLIC_URL || `http://localhost:${process.env.PORT || 3000}`).replace(/\/+$/, ''),
 };

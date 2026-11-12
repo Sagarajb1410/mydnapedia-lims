@@ -62,7 +62,7 @@ function build(db, { s, p, t, a, bill, sbill }) {
     address: set('companyAddress'), gstin: set('companyGstin'), state: set('companyState'), email: set('supportEmail'), pan: set('companyPan'),
     bank: set('bankName') || set('bankAccount') ? { name: set('bankName'), account: set('bankAccount'), ifsc: set('bankIfsc') } : null,
   };
-  const patientBuyer = { name: p.full_name, address: [p.address, `${p.city} ${p.pincode}`].filter(Boolean).join(', '), state: p.state, phone: p.mobile };
+  const patientBuyer = { name: p.full_name, address: [p.address, `${p.city || ''} ${p.pincode || ''}`.trim()].filter(Boolean).join(', '), state: p.state, phone: p.mobile };
   const sac = set('invoiceSac');
   let seller, buyer, rate, taxable, tax, listExcl, discPct, invoiceNo, payment;
   if (sbill) {
