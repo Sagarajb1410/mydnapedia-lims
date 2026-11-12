@@ -108,14 +108,16 @@ function patchForm(text) {
     text = text.replace(FIND, 'let n=mdpFormTables(r);');
     text = text.replace(READ_DOCX, (x) => reader + x);
   }
-  // Forms saved as PDF go through the same reader.
+  // Forms saved as PDF go through the same reader. The action plan window also
+// reads the first pages' text of a white-labelled report (__mdpPdfText) for
+// the sample ID and age printed at the foot of its pages.
   if (!text.includes('let n=mdpFormTables(r);') || text.includes('function mdpFormPdfXml')) return text;
   const open = OPEN_PDF.exec(text);
   const lines = PAGE_LINES.exec(text);
   if (!open || !lines) return text;
   const pdf = PDF_READER.replace(/\n/g, '').replace('__OPEN__', () => open[1]).replace('__LINES__', () => lines[1]);
   return text
-    .replace(/(async function [\w$]+\(e\)\{let t,r;try\{)(t=await [\w$]+\.default\.loadAsync\(e\))/, (m, a, b) => `window.__mdpFormPdfXml=b=>mdpFormPdfXml(b);window.__mdpReadForm=b=>${/function ([\w$]+)/.exec(a)[1]}(b);${pdf}${a}if(e[0]===37&&e[1]===80&&e[2]===68&&e[3]===70)r=mdpFormPdfXml(e);else ${b}`)
+    .replace(/(async function [\w$]+\(e\)\{let t,r;try\{)(t=await [\w$]+\.default\.loadAsync\(e\))/, (m, a, b) => `window.__mdpFormPdfXml=b=>mdpFormPdfXml(b);window.__mdpPdfText=(b,n)=>{let d=${open[1]}(b),o=[];for(let i=0;i<Math.min(n||3,d.countPages());i++)o.push(${lines[1]}(d.loadPage(i)).lines.map(l=>l.text).join(String.fromCharCode(10)));return o.join(String.fromCharCode(10))};window.__mdpReadForm=b=>${/function ([\w$]+)/.exec(a)[1]}(b);${pdf}${a}if(e[0]===37&&e[1]===80&&e[2]===68&&e[3]===70)r=mdpFormPdfXml(e);else ${b}`)
     .replace('catch{throw new Error("That file is not a Word document (.docx).")}', 'catch(x){throw new Error(/no readable text/.test(x&&x.message)?x.message:"That file is not the counselling form in Word (.docx) or PDF.")}')
     .replace('Load a form filled in Word (.docx)', 'Load a filled form (Word or PDF)')
     .replace(/(id="w-import" accept=")/, '$1.pdf,application/pdf,');

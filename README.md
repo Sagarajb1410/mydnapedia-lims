@@ -35,6 +35,8 @@ All five modules of the guideline are in. Converting partner reports and draftin
 
 **Trying it with your own data:** use `START-LIMS-OWN-DATA-WINDOWS.bat` (Mac: `start-lims-own-data-mac.command`) instead. It starts an empty LIMS kept in a separate `data-own` folder, so the dummy data and your data never mix. The first start shows the admin email and a one-time password (also saved in `data-own/FIRST-SIGN-IN.txt`). Then, as admin, add your settings, tests and prices, franchises and their credit, and a sign-in for each person, before registering samples. Run one LIMS at a time.
 
+**Where your data is kept:** everything (patients, samples, bills, reports) is in one database file, `data-own/lims.sqlite`, with uploaded files in `data-own/files`. Each day the LIMS saves a copy in `data-own/backups/<date>` and keeps 14 days. Admin, **Download backup** gives one zip with all of it to keep on a pen drive or in the company Google Drive. To restore, close the LIMS and put the backup's `lims.sqlite` and `files` back into `data-own`.
+
 The demo start file fills the LIMS with dummy accounts, tests and samples. Every demo sign-in uses the password `test1234`:
 
 | Email | Role |

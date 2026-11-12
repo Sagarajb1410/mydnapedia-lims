@@ -7,7 +7,8 @@ const fs = require('node:fs');
 const { DatabaseSync } = require('node:sqlite');
 const db = require('../src/db');
 const seed = require('../src/seed');
-const { backup } = require('../src/backup');
+const { backup, backupZip } = require('../src/backup');
+const { unzip } = require('../src/xlsx');
 
 test('backup copies the database and files, and keeps 14 days', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lims-backup-'));
@@ -24,4 +25,15 @@ test('backup copies the database and files, and keeps 14 days', () => {
   const days = fs.readdirSync(path.join(dir, 'backups')).sort();
   assert.strictEqual(days.length, 14);
   assert.strictEqual(days.at(-1), '2026-10-07');
+});
+
+test('the download zip holds a working database and every stored file', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lims-download-'));
+  const d = db.open(path.join(dir, 'lims.sqlite'));
+  seed.demo(d, null);
+  fs.mkdirSync(path.join(dir, 'files', 'reports'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'files', 'reports', 'a.pdf'), '%PDF-1.4 test');
+  const entries = unzip(backupZip(d, path.join(dir, 'files')));
+  assert.deepStrictEqual([...entries.keys()].sort(), ['files/reports/a.pdf', 'lims.sqlite']);
+  assert.strictEqual(entries.get('files/reports/a.pdf')(), '%PDF-1.4 test');
 });

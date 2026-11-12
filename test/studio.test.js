@@ -156,6 +156,25 @@ test('the action plan reopens with the saved results and the counsellor\'s lates
   });
 });
 
+test('a case saved without the client\'s age takes it from the LIMS', async () => {
+  await withApp(async ({ d, store, base }) => {
+    const admin = d.get("SELECT * FROM users WHERE email = 'admin@mydnapedia.example'");
+    studio.install(d, store, admin, { data: Buffer.from(FAKE) });
+    const cookie = await signIn(base, 'admin@mydnapedia.example');
+    const page = await (await fetch(`${base}/studio?sample=MDP00020260014&step=plan`, { headers: { cookie } })).text();
+    assert.ok(page.includes('id="mdp-age"'), 'the action plan window has an age box');
+    const key = /"key":"([0-9a-f]{64})"/.exec(page)[1];
+    const call = async (body) => (await fetch(`${base}/studio/api`, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify({ ...body, key }) })).json();
+    const c = JSON.parse((await call({ action: 'loadCase', sampleId: 'MDP00020260014' })).data.json);
+    const age = c.patient.age;
+    assert.ok(age, 'the LIMS knows the age');
+    c.patient = { ...c.patient, age: '' };
+    assert.ok((await call({ action: 'push', sampleId: 'MDP00020260014', kind: 'case', name: 'case.json', mime: 'application/json', b64: Buffer.from(JSON.stringify(c)).toString('base64') })).ok);
+    const back = JSON.parse((await call({ action: 'loadCase', sampleId: 'MDP00020260014' })).data.json);
+    assert.strictEqual(String(back.patient.age), String(age));
+  });
+});
+
 test('a skin sample opens the Skin Health copy for converting', async () => {
   await withApp(async ({ d, store, base }) => {
     const admin = d.get("SELECT * FROM users WHERE email = 'admin@mydnapedia.example'");
@@ -259,6 +278,42 @@ G.finish=function(e,t={}){let p=G.AP.generate(e),g=p.blocks;for(let r of[/Fitnes
   assert.strictEqual(skin.at(-1).t, 'closing');
 });
 
+test('the action plan is kept short, in the layout of the trimmed sample', () => {
+  const { shortenPlan } = require('../src/studio-plan');
+  const sec = (title) => ({ t: 'section', kicker: 'x', title });
+  const make = (drugs) => ({ blocks: [
+    { t: 'info', rows: [[['Client Name', 'A'], ['Sample ID', 'B']], [['Report Date', '1 Oct'], ['Action Plan Prepared', '']]] },
+    sec('Your Top Priorities at a Glance'), { t: 'table', headers: ['#', 'Priority'], rows: [['1', 'Walk daily'], ['2', 'Check thyroid']] },
+    sec('Nutrition Action Plan'), { t: 'sub', text: 'Close your nutrient gaps' }, { t: 'bullets', items: [{ label: 'Iron', text: '' }] },
+    { t: 'sub', text: 'Gut, liver and gallbladder support' }, { t: 'bullets', items: [{ label: 'Fibre every day', text: '' }, { label: 'Keep a food diary', text: '' }] },
+    sec('Mental Wellbeing Plan'), { t: 'bullets', items: [{ label: 'Daily calm practice', text: '' }, { label: 'When to reach out sooner', text: '' }] },
+    sec('Prevention of Risks'), { t: 'table', rows: [] }, { t: 'sub', text: 'Also noted' },
+    { t: 'bullets', items: [{ label: 'Cancer panel summary', text: '' }, { label: 'Carrier status', text: 'No variants found for PKU.' }, { label: 'Hair Loss (medium)', text: 'From the report.' }, { label: 'Favourable findings', text: 'Normal risk for stroke.' }] },
+    sec('Note for Your Physician — Pharmacogenomic Highlights'), { t: 'p', text: 'Your report tested 3 medicines. Please show this table and the full report to any doctor.' },
+    { t: 'table', rows: drugs },
+    sec('Next Steps'), { t: 'numbered', items: ['Walk daily', 'Check thyroid', '**Move 150 minutes a week**'] },
+  ] });
+  const drugs = [['**Metformin**', 'ATM — AA', 'Decreased response.'], ['Warfarin', 'Baseline', 'Normal.'], ['Codeine', 'Baseline', 'Normal. **You told us you take this medicine** — show it.']];
+  const b = shortenPlan(make(drugs), { priorities: '1. Walk daily' }).blocks;
+  const titles = b.filter((x) => x.t === 'section').map((x) => x.title.split(' —')[0]);
+  assert.deepStrictEqual(titles, ['Nutrition Action Plan', 'Mental Wellbeing Plan', 'Prevention of Risks', 'Note for Your Physician', 'Next Steps'], 'no priorities table');
+  assert.deepStrictEqual(b[0].rows.length, 1, 'no report date row');
+  assert.deepStrictEqual(b.filter((x) => x.t === 'sub').map((x) => x.text), ['Close your nutrient gaps', 'Also noted']);
+  const bullets = b.filter((x) => x.t === 'bullets').map((x) => x.items.map((i) => i.label));
+  assert.deepStrictEqual(bullets, [['Iron', 'Keep a food diary'], ['Daily calm practice', 'Favourable findings'], ['Hair Loss (medium)']]);
+  const steps = b.find((x) => x.t === 'numbered').items;
+  assert.deepStrictEqual(steps, ['Walk daily', '**Move 150 minutes a week**'], 'the counsellor\'s own priority stays, the generated ones go');
+  const doc = b.filter((x) => x.t === 'table').at(-1);
+  assert.deepStrictEqual(doc.rows.map((r) => r[0]), ['**Metformin**', 'Codeine'], 'flagged medicines and ones the client takes');
+  assert.match(b.find((x) => x.t === 'p').text, /Only the flagged medicines and the ones you take are listed below; the other 1 is in your report\. Please show this table/);
+  // A mood concern keeps the reach-out advice; no flagged medicine drops the table.
+  const calm = shortenPlan(make([['Warfarin', 'Baseline', 'Normal.']]), { conditions: ['mood'] }).blocks;
+  assert.ok(calm.some((x) => x.t === 'bullets' && x.items.some((i) => i.label === 'When to reach out sooner')));
+  assert.strictEqual(calm.filter((x) => x.t === 'table').length, 1, 'only the prevention table is left');
+  assert.match(calm.find((x) => x.t === 'p').text, /None is flagged, so no table is shown here/);
+  assert.deepStrictEqual(shortenPlan({}, null), {}, 'anything unexpected is left alone');
+});
+
 test('a counselling form saved as PDF goes through the same reader', () => {
   const { patchForm } = require('../src/studio-form');
   const tool = `<label class="btn">Load a form filled in Word (.docx)<input type="file" id="w-import" accept=".docx">
@@ -284,4 +339,35 @@ async function vc(e){let t,r;try{t=await ls.default.loadAsync(e),r=await t.file(
   assert.match(xml, /Walk daily<\/w:t><w:br\/><w:t xml:space='preserve'>Cut salt/, 'answer lines keep their line breaks');
   assert.match(xml, /E2\. Preventive Health Check<\/w:t><\/w:r><\/w:p><w:tbl><w:tr><w:tc><w:p><w:r><w:t xml:space='preserve'><\/w:t>/, 'an empty answer box keeps its place');
   assert.throws(() => run(null, () => ({ countPages: () => 1, loadPage: () => 0 }), () => ({ h: 842, lines: [] }))(new Uint8Array(4)), /no readable text/);
+});
+
+test('question marks the partner\'s PDF printed for lost characters, and its spelling slips, are corrected', () => {
+  const { patchText } = require('../src/studio-text');
+  // The tool's own correction step, as minified in the real file.
+  const tool = '<script>function zi(e){return!!e&&/[A-Za-z0-9]/.test(e)}function Jn(e,t){let r=e;for(let n of t){if(!n||!n.find||n.find===n.replace)continue;let i=0,a="";for(;;){let s=r.indexOf(n.find,i);if(s<0)break;let o=r[s-1],l=r[s+n.find.length],h=!(zi(n.find[0])&&zi(o))&&!(zi(n.find[n.find.length-1])&&zi(l));a+=r.slice(i,s)+(h?n.replace:n.find),i=s+n.find.length}r=a+r.slice(i)}return r}</script>';
+  const out = patchText(tool);
+  assert.notStrictEqual(out, tool, 'the correction step is found');
+  const Jn = new Function(`${out.slice(8, -9)}; return Jn;`)();
+  const fix = (s) => Jn(s, [{ find: 'TGF-?', replace: 'TGF-beta' }]);
+  assert.strictEqual(fix('The ?2-adrenergic receptors (ADRB2) gene'), 'The beta-2 adrenergic receptors (ADRB2) gene');
+  assert.strictEqual(fix('exercise outcomes ? either'), 'exercise outcomes – either');
+  assert.strictEqual(fix('influenced by gene?diet, gene?exercise interactions'), 'influenced by gene-diet, gene-exercise interactions');
+  assert.strictEqual(fix('an individual?s ability'), 'an individual’s ability');
+  assert.strictEqual(fix('Resiliant to stressful situations'), 'Resilient to stressful situations');
+  assert.strictEqual(fix('You maybe  slightly susceptible'), 'You may be slightly susceptible', 'any run of spaces matches');
+  assert.strictEqual(fix('High likely to have peanut allergy'), 'Highly likely to have peanut allergy');
+  assert.strictEqual(fix('needs to further investigated.'), 'needs to be further investigated.');
+  assert.strictEqual(fix('TGF-? levels with β cells'), 'TGF-beta levels with beta cells', 'a rewritten line spells out letters the font lacks');
+  for (const same of ['What is VO2 max? It is', 'see https://x.org/a?b=c', 'A line with β left as it is', 'Highly likely to have'])
+    assert.strictEqual(fix(same), same, 'a real question mark, a web address and unchanged lines are left alone');
+  assert.strictEqual(patchText('<script>var other=1</script>'), '<script>var other=1</script>', 'a tool without that step is left alone');
+});
+
+test('slips from a second Fitness report are corrected too', () => {
+  const { patchText } = require('../src/studio-text');
+  const tool = '<script>function zi(e){return!!e&&/[A-Za-z0-9]/.test(e)}function Jn(e,t){let r=e;for(let n of t){if(!n||!n.find||n.find===n.replace)continue;let i=0,a="";for(;;){let s=r.indexOf(n.find,i);if(s<0)break;let o=r[s-1],l=r[s+n.find.length],h=!(zi(n.find[0])&&zi(o))&&!(zi(n.find[n.find.length-1])&&zi(l));a+=r.slice(i,s)+(h?n.replace:n.find),i=s+n.find.length}r=a+r.slice(i)}return r}</script>';
+  const Jn = new Function(`${patchText(tool).slice(8, -9)}; return Jn;`)();
+  assert.strictEqual(Jn('The BCMO1 gene (?-carotene 15,15?-monooxygenase 1) chemically', []), 'The BCMO1 gene (beta-carotene 15,15′-monooxygenase 1) chemically');
+  assert.strictEqual(Jn('6. Vitamin A fortified crap (steal from Vit D).', []), '6. Vitamin A-fortified foods, such as breakfast cereals and milk.');
+  assert.strictEqual(Jn('Magnesium is one of the abundant minerals in the body', []), 'Magnesium is one of the most abundant minerals in the body');
 });

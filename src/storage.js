@@ -13,6 +13,7 @@ function localAdapter(baseDir) {
     return path.join(baseDir, key);
   };
   return {
+    dir: baseDir,
     put(key, buffer) {
       const file = safe(key);
       fs.mkdirSync(path.dirname(file), { recursive: true });
