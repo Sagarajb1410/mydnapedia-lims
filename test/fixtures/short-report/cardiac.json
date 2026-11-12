@@ -1,0 +1,343 @@
+{
+ "app": "mdp-report-studio-case",
+ "version": 1,
+ "patient": {
+  "name": "Rakesh Dummy",
+  "sampleId": "MDP00020269902",
+  "gender": "Male",
+  "age": 48,
+  "reportDate": "20 Jun 2026"
+ },
+ "clinical": {
+  "rows": [
+   {
+    "section": "trait",
+    "group": "Risk Factors",
+    "name": "Blood Pressure",
+    "level": 2,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Risk Factors",
+    "name": "High Density Cholesterol Levels (HDL)",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Risk Factors",
+    "name": "Low Density Cholesterol Levels (LDL)",
+    "level": 1,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Risk Factors",
+    "name": "Triglycerides",
+    "level": 1,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Risk Factors",
+    "name": "Homocysteine levels",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Risk Factors",
+    "name": "Magnesium",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Risk Factors",
+    "name": "Iron",
+    "level": 1,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Weight Management",
+    "name": "Appetite and Eating Behavior",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Weight Management",
+    "name": "Obesity",
+    "level": 1,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Weight Management",
+    "name": "Weight Loss",
+    "level": 1,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Habits and Addictions",
+    "name": "Sleep Depth",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Habits and Addictions",
+    "name": "Sleep Duration",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Habits and Addictions",
+    "name": "Nicotine Addiction",
+    "level": 1,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Habits and Addictions",
+    "name": "Alcohol Addiction",
+    "level": 2,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Exercise and Recovery",
+    "name": "Muscle Performance",
+    "level": 0,
+    "result": "Greater proportion of slow-twitch muscle fibers. Enhanced performance in endurance-based sports and activities."
+   },
+   {
+    "section": "trait",
+    "group": "Exercise and Recovery",
+    "name": "Sports Injury - Anterior Cruciate Ligament (ACL) rupture",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Exercise and Recovery",
+    "name": "Detox Capacity",
+    "level": 1,
+    "result": ""
+   },
+   {
+    "section": "disease",
+    "group": "Cardiovascular",
+    "name": "Atrial Fibrillation",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "disease",
+    "group": "Cardiovascular",
+    "name": "Coronary Heart Disease",
+    "level": 2,
+    "result": ""
+   },
+   {
+    "section": "disease",
+    "group": "Cardiovascular",
+    "name": "Stroke",
+    "level": 1,
+    "result": ""
+   },
+   {
+    "section": "disease",
+    "group": "Cardiovascular",
+    "name": "Hypertrophic Cardiomyopathy",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "disease",
+    "group": "Cardiovascular",
+    "name": "Venous Thromboembolism",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "disease",
+    "group": "Cardiovascular",
+    "name": "Sudden Cardiac Arrest",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "disease",
+    "group": "Cardiovascular",
+    "name": "Long QT Interval",
+    "level": 1,
+    "result": ""
+   },
+   {
+    "section": "disease",
+    "group": "Diabetes and Thyroid",
+    "name": "Type 1 Diabetes",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "disease",
+    "group": "Diabetes and Thyroid",
+    "name": "Type 2 Diabetes",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "disease",
+    "group": "Diabetes and Thyroid",
+    "name": "Hypothyroidism",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "drug",
+    "group": "",
+    "name": "Simvastatin",
+    "level": 0,
+    "result": "Baseline risk for statin-related myopathy"
+   },
+   {
+    "section": "drug",
+    "group": "",
+    "name": "Atorvastatin",
+    "level": 0,
+    "result": "Baseline risk"
+   },
+   {
+    "section": "drug",
+    "group": "",
+    "name": "Propranolol",
+    "level": 1,
+    "result": "Slightly high genetic risk for decreased drug response"
+   },
+   {
+    "section": "drug",
+    "group": "",
+    "name": "Carvedilol",
+    "level": 0,
+    "result": "Normal metabolizer"
+   },
+   {
+    "section": "drug",
+    "group": "",
+    "name": "Metoprolol",
+    "level": 0,
+    "result": "Normal metabolizer"
+   },
+   {
+    "section": "drug",
+    "group": "",
+    "name": "Warfarin",
+    "level": 0,
+    "result": "Baseline risk for drug-induced bleeding"
+   },
+   {
+    "section": "drug",
+    "group": "",
+    "name": "Acenocoumarol",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "drug",
+    "group": "",
+    "name": "Phenprocoumon",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "drug",
+    "group": "",
+    "name": "Clopidogrel",
+    "level": 1,
+    "result": "Intermediate metabolizer. Alternate therapy may be required."
+   },
+   {
+    "section": "drug",
+    "group": "",
+    "name": "Isosorbide and Hydralazine (BIDIL)",
+    "level": 2,
+    "result": "Slow acetylator. High risk for drug-induced side effects or toxicity."
+   },
+   {
+    "section": "drug",
+    "group": "",
+    "name": "Propafenone",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "drug",
+    "group": "",
+    "name": "Metformin",
+    "level": 2,
+    "result": "High likelihood for decreased drug response."
+   },
+   {
+    "section": "drug",
+    "group": "",
+    "name": "Glimeperide",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "drug",
+    "group": "",
+    "name": "Glipizide",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "drug",
+    "group": "",
+    "name": "Glyburide",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "drug",
+    "group": "",
+    "name": "Chlorpropamide",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "drug",
+    "group": "",
+    "name": "Rosuvastatin",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "drug",
+    "group": "",
+    "name": "Ticagrelor",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "drug",
+    "group": "",
+    "name": "Prasugrel",
+    "level": 0,
+    "result": ""
+   }
+  ],
+  "details": {}
+ },
+ "form": {
+  "life": {
+   "diet": "Non-veg"
+  }
+ }
+}

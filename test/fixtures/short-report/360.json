@@ -1,0 +1,721 @@
+{
+ "app": "mdp-report-studio-case",
+ "version": 1,
+ "patient": {
+  "name": "Meera Dummy",
+  "sampleId": "MDP00020269903",
+  "gender": "Female",
+  "age": 41,
+  "reportDate": "05 Nov 2026"
+ },
+ "clinical": {
+  "rows": [
+   {
+    "section": "trait",
+    "group": "Longevity Essentials",
+    "name": "Healthy Aging",
+    "level": 0,
+    "result": "Very likely to have better health, leading to a longer life span"
+   },
+   {
+    "section": "trait",
+    "group": "Longevity Essentials",
+    "name": "Osteoporosis",
+    "level": 1,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Nutrition",
+    "name": "Vitamin D",
+    "level": 2,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Nutrition",
+    "name": "Vitamin C",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Nutrition",
+    "name": "Vitamin B6",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Nutrition",
+    "name": "Vitamin B9",
+    "level": 1,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Nutrition",
+    "name": "Vitamin B12",
+    "level": 1,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Nutrition",
+    "name": "Healthy Fats (PUFA)",
+    "level": 1,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Skin and Hair",
+    "name": "Eyebrow Thickness",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Skin and Hair",
+    "name": "Teenage Acne",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Skin and Hair",
+    "name": "Sun burns",
+    "level": 1,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Skin and Hair",
+    "name": "Tanning",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Skin and Hair",
+    "name": "Freckling",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Lifestyle",
+    "name": "Sleep Duration",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Lifestyle",
+    "name": "Sleep Cycle",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Lifestyle",
+    "name": "Sleep Depth",
+    "level": 1,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Lifestyle",
+    "name": "High Altitude Adaptation",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Lifestyle",
+    "name": "Nicotine Addiction",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Lifestyle",
+    "name": "Alcohol Addiction",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Lifestyle",
+    "name": "Alcohol Flush Reaction",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Lifestyle",
+    "name": "Caffeine Addiction",
+    "level": 1,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Lifestyle",
+    "name": "Obesity",
+    "level": 2,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Lifestyle",
+    "name": "Detox Capacity",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Lifestyle",
+    "name": "Dietary Fat Sensitivity",
+    "level": 1,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Behavioural",
+    "name": "Resilience (Personality)",
+    "level": 1,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Behavioural",
+    "name": "Learning Capacity",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Behavioural",
+    "name": "Memory",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Cardiovascular",
+    "name": "Low Density Cholesterol (LDL)",
+    "level": 2,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Cardiovascular",
+    "name": "High Density Cholesterol (HDL)",
+    "level": 1,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Cardiovascular",
+    "name": "Homocysteine levels",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Cardiovascular",
+    "name": "Blood Pressure",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Cardiovascular",
+    "name": "Triglycerides",
+    "level": 1,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Food Allergies",
+    "name": "Peanut Allergy",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Food Allergies",
+    "name": "Lactose Intolerance",
+    "level": 1,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Micro Nutrients",
+    "name": "Zinc levels",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Micro Nutrients",
+    "name": "Magnesium",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Micro Nutrients",
+    "name": "Iron",
+    "level": 2,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Micro Nutrients",
+    "name": "Iron Overload",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Sports",
+    "name": "Motivation to Exercise",
+    "level": 1,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Sports",
+    "name": "VO2 Max",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Sports",
+    "name": "Muscle Performance",
+    "level": 0,
+    "result": "Greater proportion of fast-twitch muscle fibers. Enhanced performance in power sports."
+   },
+   {
+    "section": "trait",
+    "group": "Sports",
+    "name": "Bone Mineral Density",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "disease",
+    "group": "Cardiovascular Diseases",
+    "name": "Atrial Fibrillation",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "disease",
+    "group": "Cardiovascular Diseases",
+    "name": "Coronary Heart Disease",
+    "level": 1,
+    "result": ""
+   },
+   {
+    "section": "disease",
+    "group": "Cardiovascular Diseases",
+    "name": "Stroke",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "disease",
+    "group": "Cardiovascular Diseases",
+    "name": "Long QT",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "disease",
+    "group": "Cardiovascular Diseases",
+    "name": "Hypertrophic Cardiomyopathy",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "disease",
+    "group": "Cardiovascular Diseases",
+    "name": "Venous Thromboembolism",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "disease",
+    "group": "Cardiovascular Diseases",
+    "name": "Sudden Cardiac Arrest",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "disease",
+    "group": "Endocrine",
+    "name": "Type 1 Diabetes",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "disease",
+    "group": "Endocrine",
+    "name": "Type 2 Diabetes",
+    "level": 2,
+    "result": ""
+   },
+   {
+    "section": "disease",
+    "group": "Endocrine",
+    "name": "Hypothyroidism",
+    "level": 1,
+    "result": ""
+   },
+   {
+    "section": "disease",
+    "group": "Cancer",
+    "name": "Colorectal cancer",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "disease",
+    "group": "Cancer",
+    "name": "Lung Cancer",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "disease",
+    "group": "Cancer",
+    "name": "Pancreatic Cancer",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "disease",
+    "group": "Cancer",
+    "name": "Bladder cancer",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "disease",
+    "group": "Cancer",
+    "name": "Melanoma",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "disease",
+    "group": "Cancer",
+    "name": "Renal Cell Carcinoma",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "disease",
+    "group": "Cancer",
+    "name": "Basal Cell Carcinoma",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "disease",
+    "group": "Cancer",
+    "name": "Follicular Lymphoma",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "disease",
+    "group": "Cancer",
+    "name": "Chronic Lymphocytic Leukemia",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "disease",
+    "group": "Cancer",
+    "name": "Hodgkins Lymphoma",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "disease",
+    "group": "Cancer",
+    "name": "Thyroid Cancer",
+    "level": 1,
+    "result": ""
+   },
+   {
+    "section": "disease",
+    "group": "Cancer",
+    "name": "Prostate Cancer",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "disease",
+    "group": "Cancer",
+    "name": "Testicular Cancer",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "disease",
+    "group": "Liver, Gastro and Renal",
+    "name": "Celiac Disease",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "disease",
+    "group": "Liver, Gastro and Renal",
+    "name": "Biliary Cirrhosis",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "disease",
+    "group": "Liver, Gastro and Renal",
+    "name": "Chronic Kidney Disease",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "disease",
+    "group": "Liver, Gastro and Renal",
+    "name": "Crohn's Disease",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "disease",
+    "group": "Liver, Gastro and Renal",
+    "name": "Ulcerative Colitis",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "disease",
+    "group": "Liver, Gastro and Renal",
+    "name": "Gallstones",
+    "level": 1,
+    "result": ""
+   },
+   {
+    "section": "disease",
+    "group": "Neuro and Psychiatry",
+    "name": "Parkinson's",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "disease",
+    "group": "Neuro and Psychiatry",
+    "name": "Multiple Sclerosis",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "disease",
+    "group": "Neuro and Psychiatry",
+    "name": "Schizophrenia",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "disease",
+    "group": "Neuro and Psychiatry",
+    "name": "Alzheimer's",
+    "level": 1,
+    "result": ""
+   },
+   {
+    "section": "disease",
+    "group": "Neuro and Psychiatry",
+    "name": "Bipolar Disorder",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "disease",
+    "group": "Neuro and Psychiatry",
+    "name": "Migraine",
+    "level": 1,
+    "result": ""
+   },
+   {
+    "section": "disease",
+    "group": "Neuro and Psychiatry",
+    "name": "Amyotrophic Lateral Sclerosis",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "disease",
+    "group": "Neuro and Psychiatry",
+    "name": "Restless Legs Syndrome",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "disease",
+    "group": "Inflammatory",
+    "name": "Ankylosing Spondylitis",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "disease",
+    "group": "Inflammatory",
+    "name": "Rheumatoid Arthritis",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "disease",
+    "group": "Inflammatory",
+    "name": "Asthma",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "disease",
+    "group": "Inflammatory",
+    "name": "Systemic Lupus Erythematosus",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "disease",
+    "group": "Eyes, Skin and Hair",
+    "name": "Age Related Macular Degeneration",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "disease",
+    "group": "Eyes, Skin and Hair",
+    "name": "Atopic Dermatitis",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "disease",
+    "group": "Eyes, Skin and Hair",
+    "name": "Psoriasis",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "disease",
+    "group": "Eyes, Skin and Hair",
+    "name": "Vitiligo",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "disease",
+    "group": "Eyes, Skin and Hair",
+    "name": "Male Pattern Baldness",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "carrier",
+    "group": "Carrier Status",
+    "name": "Glucose-6-Phosphate (G6PD) Deficiency",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "carrier",
+    "group": "Carrier Status",
+    "name": "Phenylketonuria",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "carrier",
+    "group": "Carrier Status",
+    "name": "Beta Thalassemia",
+    "level": 1,
+    "result": ""
+   },
+   {
+    "section": "carrier",
+    "group": "Carrier Status",
+    "name": "Cystic Fibrosis",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "carrier",
+    "group": "Carrier Status",
+    "name": "Sickle Cell Anaemia",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "drug",
+    "group": "",
+    "name": "Clopidogrel",
+    "level": 0,
+    "result": "Normal metabolizer"
+   },
+   {
+    "section": "drug",
+    "group": "",
+    "name": "Warfarin",
+    "level": 1,
+    "result": "Increased risk for drug-induced bleeding. Lower dose may be required."
+   },
+   {
+    "section": "drug",
+    "group": "",
+    "name": "Simvastatin",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "drug",
+    "group": "",
+    "name": "Omeprazole",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "drug",
+    "group": "",
+    "name": "Codeine",
+    "level": 2,
+    "result": "Poor metabolizer. Reduced response and risk of side effects."
+   },
+   {
+    "section": "drug",
+    "group": "",
+    "name": "Tamoxifen",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "drug",
+    "group": "",
+    "name": "Metformin",
+    "level": 0,
+    "result": ""
+   }
+  ],
+  "details": {}
+ },
+ "form": {
+  "life": {
+   "diet": "Eggetarian"
+  }
+ }
+}

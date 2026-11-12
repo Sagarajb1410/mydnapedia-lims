@@ -1,0 +1,217 @@
+{
+ "app": "mdp-report-studio-case",
+ "version": 1,
+ "patient": {
+  "name": "Kavya Dummy",
+  "sampleId": "MDP00020269904",
+  "gender": "Female",
+  "age": 29,
+  "reportDate": "02 Nov 2026"
+ },
+ "clinical": {
+  "rows": [
+   {
+    "section": "trait",
+    "group": "Skin Texture and Aging",
+    "name": "Collagen Quality",
+    "level": 2,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Skin Texture and Aging",
+    "name": "Skin Elasticity",
+    "level": 1,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Skin Texture and Aging",
+    "name": "Wrinkles",
+    "level": 1,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Skin Texture and Aging",
+    "name": "Glycation",
+    "level": 1,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Skin Texture and Aging",
+    "name": "Stretch Marks",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Skin Texture and Aging",
+    "name": "Cellulite",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Skin Texture and Aging",
+    "name": "Skin Hydration",
+    "level": 1,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Skin Damage",
+    "name": "Sun burns",
+    "level": 2,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Skin Damage",
+    "name": "Tanning",
+    "level": 1,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Skin Damage",
+    "name": "Freckling",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Skin Damage",
+    "name": "Pigmentation",
+    "level": 2,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Skin Damage",
+    "name": "Antioxidant Capacity",
+    "level": 1,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Hair Care",
+    "name": "Hair Loss",
+    "level": 1,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Hair Care",
+    "name": "Premature Greying",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Hair Care",
+    "name": "Dandruff",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Skin Nutrition",
+    "name": "Vitamin A",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Skin Nutrition",
+    "name": "Vitamin C",
+    "level": 1,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Skin Nutrition",
+    "name": "Vitamin E",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Skin Nutrition",
+    "name": "Vitamin D",
+    "level": 1,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Skin Nutrition",
+    "name": "Healthy Fats",
+    "level": 1,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Skin Nutrition",
+    "name": "Zinc levels",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Skin Nutrition",
+    "name": "Biotin",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Skin Inflammation",
+    "name": "Teenage Acne",
+    "level": 1,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Skin Inflammation",
+    "name": "Rosacea",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Skin Inflammation",
+    "name": "Atopic Dermatitis",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Skin Inflammation",
+    "name": "Psoriasis",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Skin Inflammation",
+    "name": "Vitiligo",
+    "level": 0,
+    "result": ""
+   },
+   {
+    "section": "trait",
+    "group": "Skin Inflammation",
+    "name": "Skin Sensitivity",
+    "level": 1,
+    "result": ""
+   }
+  ],
+  "details": {}
+ },
+ "form": {
+  "life": {
+   "diet": "Vegan"
+  }
+ }
+}
