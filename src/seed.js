@@ -186,6 +186,10 @@ function demo(db, store = null) {
     const ap = counselling.uploadPlan(db, store, counsellor, c8.sample_id, { filename: 'plan.pdf', type: 'application/pdf', data: planPdf });
     counselling.reviewPlan(db, store, root, ap.id, { approve: true, pagesChecked: true });
     counselling.deliver(db, store, counsellor, ap.id);
+    // Free times for the next two weeks (weekdays, 10 am to 1 pm), so clients can choose one.
+    const dates = Array.from({ length: 14 }, (_, i) => new Date(Date.now() + (i + 1) * 86400000 + 330 * 60000))
+      .filter((d) => d.getUTCDay() % 6 !== 0).map((d) => d.toISOString().slice(0, 10));
+    counselling.addSlots(db, counsellor, { dates, from: '10:00', to: '13:00', minutes: 45, mode: 'Video call' });
 
     reports.uploadSource(db, store, lab, c5.sample_id, pdf(c5, false));
     reports.uploadBranded(db, store, lab, c5.sample_id, pdf(c5, true, true));

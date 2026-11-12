@@ -1,0 +1,33 @@
+# Render blueprint for the live LIMS (Singapore; Render has no India region).
+# In Render: New, Blueprint, pick this repository. See deploy/RENDER.md.
+services:
+  - type: web
+    name: mydnapedia-lims
+    runtime: node
+    region: singapore
+    plan: starter
+    branch: main
+    buildCommand: node --version
+    startCommand: npm start
+    healthCheckPath: /login
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: LIMS_STAGE
+        value: live
+      - key: HOST
+        value: 0.0.0.0
+      - key: DATA_DIR
+        value: /var/data
+      - key: STORAGE
+        value: local
+      - key: NIGHTLY_BACKUP
+        value: "1"
+      - key: FIRST_ADMIN_EMAIL
+        sync: false
+      - key: PUBLIC_URL
+        sync: false
+    disk:
+      name: lims-data
+      mountPath: /var/data
+      sizeGB: 5

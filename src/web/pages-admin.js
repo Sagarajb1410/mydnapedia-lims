@@ -4,6 +4,7 @@ const admin = require('../admin');
 const notify = require('../notify');
 const samples = require('../samples');
 const studio = require('../studio');
+const { backupZip } = require('../backup');
 const { fmtDateTime, rupees, UserError, getSetting, setSetting, SETTING_DEFAULTS, istDate } = require('../util');
 
 const SETTING_LABELS = {
@@ -12,6 +13,7 @@ const SETTING_LABELS = {
   supportEmail: 'Admin and support email',
   supportPhone: 'Support phone (in patient messages)',
   sampleIdPrefix: 'Sample ID prefix',
+  sampleIdFormat: 'Sample ID format ({PREFIX}, {YYYY} or {YY}, and the running number such as {N4})',
   companyGstin: 'MyDNAPedia GSTIN',
   companyAddress: 'Company address',
   companyLegalName: 'Company legal name (on invoices)',
@@ -44,26 +46,38 @@ module.exports = function (router, { db, storage }, h) {
 ${tile('/admin/accounts', 'billing', 'B2B partners and suppliers', 'Accounts, GSTIN, contacts, reminder levels')}
 ${tile('/admin/users', 'register', 'People', 'Sign-ins and roles')}
 ${tile('/audit', 'reports', 'Audit trail', 'Every change, who and when')}</div>
+<h2 id="backup">Backup</h2><div class="card"><p style="margin-top:0">Every patient, sample, bill and report is kept in the LIMS database. It also saves a copy of itself every day and keeps the last 14 days. Download a copy here to keep somewhere safe, such as a pen drive or your company Google Drive. It holds client data, so never email it or share it.</p>
+<div class="actions" style="margin-top:0"><a class="btn light" href="/admin/backup">Download backup</a></div></div>
 <h2 id="report-centre">Report Centre</h2><div class="card">${(() => {
   const st = studio.status(storage);
-  return html`<p style="margin-top:0">${st.installed
-    ? html`<span class="pill ${st.linked ? 'good' : 'warn'}">${st.linked ? 'Installed and linked' : 'Installed, not linked'}</span> ${st.from === 'bundled' ? 'Using the copy that came with the LIMS.' : 'Using the copy you installed.'}`
-    : html`<span class="pill warn">Not installed</span> Staff cannot open Report Centre until it is installed.`}</p>
-<p class="muted">Report Centre converts the partner's report, holds the counselling form and drafts the action plan. It runs in the browser, so client data stays inside our system. Install a new version by choosing the Report Studio HTML file; its built-in partner names are removed and the names under Settings are used instead.</p>
-<form method="post" action="/admin/studio" enctype="multipart/form-data"><label for="studio-file">Report Studio HTML file</label><input id="studio-file" type="file" name="file" accept=".html,text/html" required>
+  const row = (t) => html`<li><b>${t.label}</b> <span class="pill ${t.installed ? (t.linked ? 'good' : 'warn') : 'warn'}">${t.installed ? (t.linked ? 'Installed and linked' : 'Installed, not linked') : 'Not installed'}</span> <span class="muted">${t.installed ? (t.from === 'bundled' ? 'The copy that came with the LIMS.' : 'The copy you installed.') : ''}</span></li>`;
+  return html`<ul style="margin-top:0;padding-left:18px;display:grid;gap:6px">${row(st.main)}${row(st.skin)}</ul>
+<p class="muted">Report Centre converts the partner's report, holds the counselling form and drafts the action plan. It runs in the browser, so client data stays inside our system. <b>Report Studio</b> handles 360 Premium, Fitness and Cardiac Health: opened from a sample, it names the report after the sample's test. <b>Skin Health Studio</b> handles Skin Health: a skin sample opens it automatically for converting. Without it, skin reports are converted as 360 Premium. Install either by choosing its HTML file; the LIMS tells them apart. Their built-in partner names are removed and the names under Settings are used instead.</p>
+<form method="post" action="/admin/studio" enctype="multipart/form-data"><label for="studio-file">Report Studio or Skin Health Studio HTML file</label><input id="studio-file" type="file" name="file" accept=".html,text/html" required>
 <div class="actions"><button class="light">Install</button></div></form>`;
 })()}</div>
 <h2>Settings</h2><form method="post" action="/admin/settings" class="card"><div class="grid">
 ${Object.keys(SETTING_DEFAULTS).map((k) => field(SETTING_LABELS[k] || k, k, getSetting(db, k)))}
+${field('Next sample number (to continue your existing series)', 'sampleNextNumber', String(samples.nextSampleNumber(db)), { type: 'number', attrs: 'min="0" step="1"' })}
+<p class="muted" style="grid-column:1/-1;margin:0">The next sample will be <b class="mono">${samples.formatSampleId(samples.sampleIdFormat(db), getSetting(db, 'sampleIdPrefix'), istDate().slice(0, 4), samples.nextSampleNumber(db))}</b>. With the year in the format, the number starts again at 1 each new year.</p>
 </div><div class="actions"><button>Save settings</button></div></form>`);
+  });
+
+  router.get('/admin/backup', (ctx) => {
+    onlyAdmin(ctx);
+    const file = backupZip(db, storage.dir);
+    require('../util').audit(db, ctx.user.id, 'backup_downloaded', 'settings', null, null);
+    h.raw(ctx, 'application/zip', file, { 'Content-Disposition': `attachment; filename="MyDNAPedia-LIMS-backup-${istDate()}.zip"` });
   });
 
   router.post('/admin/settings', (ctx) => {
     onlyAdmin(ctx);
     const prefix = (ctx.body.sampleIdPrefix || '').trim().toUpperCase();
     if (!/^[A-Z]{2,5}$/.test(prefix)) throw new UserError('The sample ID prefix must be 2 to 5 letters.');
+    const format = 'sampleIdFormat' in ctx.body ? samples.checkFormat(ctx.body.sampleIdFormat) : null;
     if ('invoiceGstRate' in ctx.body && !['0', '5', '12', '18', '28'].includes(String(ctx.body.invoiceGstRate).trim())) throw new UserError('The GST rate must be 0, 5, 12, 18 or 28.');
-    for (const k of Object.keys(SETTING_DEFAULTS)) if (k in ctx.body) setSetting(db, k, k === 'sampleIdPrefix' ? prefix : String(ctx.body[k]).trim());
+    for (const k of Object.keys(SETTING_DEFAULTS)) if (k in ctx.body) setSetting(db, k, k === 'sampleIdPrefix' ? prefix : k === 'sampleIdFormat' ? format : String(ctx.body[k]).trim());
+    if (String(ctx.body.sampleNextNumber || '').trim() && Number(ctx.body.sampleNextNumber) !== samples.nextSampleNumber(db)) samples.setNextSampleNumber(db, ctx.body.sampleNextNumber);
     require('../util').audit(db, ctx.user.id, 'settings_changed', 'settings', null, ctx.body);
     h.redirect(ctx, '/admin', { type: 'ok', text: 'Settings saved.' });
   });
@@ -210,7 +224,7 @@ ${rows.map((r) => html`<tr><td>${fmtDateTime(r.at)}</td><td>${r.user_name || ''}
       `SELECT n.*, s.sample_id, u.name AS sent_by_name FROM notifications n LEFT JOIN samples s ON s.id = n.sample_pk LEFT JOIN users u ON u.id = n.sent_by
         WHERE ${show === 'pending' ? "n.status = 'pending'" : "n.status != 'pending'"} ORDER BY n.id DESC LIMIT 200`);
     h.send(ctx, 'Outbox', html`<h1>Outbox</h1>
-<p class="sub">In this test version nothing is sent automatically. Open a message to see it ready in WhatsApp or your mail app, send it, then mark it sent. Only send to your own test numbers while using dummy data.</p>
+<p class="sub">Nothing is sent automatically. Open a message to see it ready in WhatsApp or your mail app, send it, then mark it sent. Only send to your own test numbers while using dummy data.</p>
 <nav class="seg"><a class="${show === 'pending' ? 'on' : ''}" href="/outbox">Waiting</a><a class="${show === 'done' ? 'on' : ''}" href="/outbox?show=done">Sent or skipped</a></nav>
 <div class="table-wrap"><table><tr><th>Created</th><th>Message</th><th>To</th><th>Text</th><th></th></tr>
 ${rows.map((n) => html`<tr><td>${fmtDateTime(n.created_at)}<br><span class="muted">${n.code} · ${notify.CODES[n.code] || ''}</span></td>
@@ -229,6 +243,12 @@ ${rows.length ? '' : html`<tr><td colspan="5" class="muted">Nothing here.</td></
     h.raw(ctx, 'application/pdf', storage.get(n.attachment_key), {
       'Content-Disposition': `attachment; filename="${n.attachment_name.replace(/[^A-Za-z0-9._-]/g, '_')}"`, 'X-Content-Type-Options': 'nosniff',
     });
+  });
+  // Opens one WhatsApp message (the courier's, from the Samples page) and marks it sent.
+  router.post('/outbox/:id/open', (ctx) => {
+    const url = require('../quick').openMessage(db, ctx.user, ctx.params.id);
+    ctx.res.writeHead(303, { Location: url });
+    ctx.res.end();
   });
   router.post('/outbox/:id', (ctx) => {
     if (!['admin', 'lab'].includes(ctx.user.role)) throw new UserError('The outbox is for staff.');

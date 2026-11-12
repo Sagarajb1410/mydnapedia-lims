@@ -21,7 +21,7 @@ function tatPill(t) {
 }
 
 function tabs(path) {
-  const items = [['/tracking', 'TAT board'], ['/tracking/pickups', 'Pickups'], ['/tracking/receive', 'Lab receipt'], ['/tracking/onward', 'Partner lab dispatch']];
+  const items = [['/tracking', 'TAT board'], ['/tracking/pickups', 'Pickups'], ['/tracking/receive', 'Lab receipt'], ['/receipts', 'Acknowledgements'], ['/tracking/onward', 'Partner lab dispatch']];
   return html`<nav class="seg noprint" aria-label="Tracking">${items.map(([href, label]) => html`<a class="${href === path ? 'on' : ''}" href="${href}">${label}</a>`)}</nav>`;
 }
 
@@ -142,12 +142,13 @@ ${items.map((s) => html`<tr><td><a class="mono" href="/samples/${s.sample_id}">$
     staffOnly(ctx);
     const expected = tracking.expectedAtLab(db);
     const last = ctx.query.last ? db.get(
-      `SELECT s.sample_id, s.status, s.tat_due_at, s.reject_reason, p.full_name, t.name AS test_name, t.route FROM samples s
+      `SELECT s.sample_id, s.status, s.tat_due_at, s.reject_reason, s.received_at, s.account_id, p.full_name, t.name AS test_name, t.route FROM samples s
          JOIN patients p ON p.id = s.patient_id JOIN tests t ON t.id = s.test_id WHERE s.sample_id = ?`, ctx.query.last) : null;
     h.send(ctx, 'Lab receipt', html`<h1>Lab receipt</h1><p class="sub">Scan each barcode as the box is opened. A barcode scanner types the ID and presses Enter for you.</p>${tabs('/tracking/receive')}
 ${last ? html`<div class="card" style="border-color:${last.status === 'REJECTED' ? 'var(--bad)' : 'var(--good)'}"><b class="mono">${last.sample_id}</b> · ${last.full_name} · ${last.test_name}<br>
 ${last.status === 'REJECTED' ? html`<span class="pill bad">Rejected</span> ${last.reject_reason}. <a href="/samples/${last.sample_id}">Request a fresh sample</a>`
-    : html`<span class="pill good">Received</span> TAT due ${fmtDate(last.tat_due_at)}. Next: ${last.route === 'in_house' ? 'start in-house processing' : html`<a href="/tracking/onward">send to the partner lab</a>`}.`}</div>` : ''}
+    : html`<span class="pill good">Received</span> TAT due ${fmtDate(last.tat_due_at)}. Next: ${last.route === 'in_house' ? 'start in-house processing' : html`<a href="/tracking/onward">send to the partner lab</a>`}.`}
+${last.received_at ? html`<br><a href="/receipts/${last.account_id}/${istDate(new Date(last.received_at))}">Print today's receipt acknowledgement for this sender</a>` : ''}</div>` : ''}
 <form method="post" action="/tracking/receive" class="card"><div class="grid">
 ${field('Sample ID', 'sample_id', '', { required: true, attrs: 'autofocus autocomplete="off"' })}
 ${select('Condition', 'condition', tracking.CONDITIONS, 'Acceptable', { required: true })}

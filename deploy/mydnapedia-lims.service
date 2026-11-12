@@ -1,0 +1,20 @@
+[Unit]
+Description=MyDNAPedia LIMS
+After=network.target
+
+[Service]
+User=lims
+Group=lims
+WorkingDirectory=/opt/mydnapedia-lims
+EnvironmentFile=/etc/mydnapedia-lims.env
+ExecStart=/usr/bin/node --no-warnings src/server.js
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/mydnapedia-lims
+
+[Install]
+WantedBy=multi-user.target
