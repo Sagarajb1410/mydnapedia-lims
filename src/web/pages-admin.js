@@ -4,6 +4,7 @@ const admin = require('../admin');
 const notify = require('../notify');
 const samples = require('../samples');
 const studio = require('../studio');
+const { backupZip } = require('../backup');
 const { fmtDateTime, rupees, UserError, getSetting, setSetting, SETTING_DEFAULTS, istDate } = require('../util');
 
 const SETTING_LABELS = {
@@ -45,6 +46,8 @@ module.exports = function (router, { db, storage }, h) {
 ${tile('/admin/accounts', 'billing', 'B2B partners and suppliers', 'Accounts, GSTIN, contacts, reminder levels')}
 ${tile('/admin/users', 'register', 'People', 'Sign-ins and roles')}
 ${tile('/audit', 'reports', 'Audit trail', 'Every change, who and when')}</div>
+<h2 id="backup">Backup</h2><div class="card"><p style="margin-top:0">Every patient, sample, bill and report is kept in the LIMS database. It also saves a copy of itself every day and keeps the last 14 days. Download a copy here to keep somewhere safe, such as a pen drive or your company Google Drive. It holds client data, so never email it or share it.</p>
+<div class="actions" style="margin-top:0"><a class="btn light" href="/admin/backup">Download backup</a></div></div>
 <h2 id="report-centre">Report Centre</h2><div class="card">${(() => {
   const st = studio.status(storage);
   const row = (t) => html`<li><b>${t.label}</b> <span class="pill ${t.installed ? (t.linked ? 'good' : 'warn') : 'warn'}">${t.installed ? (t.linked ? 'Installed and linked' : 'Installed, not linked') : 'Not installed'}</span> <span class="muted">${t.installed ? (t.from === 'bundled' ? 'The copy that came with the LIMS.' : 'The copy you installed.') : ''}</span></li>`;
@@ -58,6 +61,13 @@ ${Object.keys(SETTING_DEFAULTS).map((k) => field(SETTING_LABELS[k] || k, k, getS
 ${field('Next sample number (to continue your existing series)', 'sampleNextNumber', String(samples.nextSampleNumber(db)), { type: 'number', attrs: 'min="0" step="1"' })}
 <p class="muted" style="grid-column:1/-1;margin:0">The next sample will be <b class="mono">${samples.formatSampleId(samples.sampleIdFormat(db), getSetting(db, 'sampleIdPrefix'), istDate().slice(0, 4), samples.nextSampleNumber(db))}</b>. With the year in the format, the number starts again at 1 each new year.</p>
 </div><div class="actions"><button>Save settings</button></div></form>`);
+  });
+
+  router.get('/admin/backup', (ctx) => {
+    onlyAdmin(ctx);
+    const file = backupZip(db, storage.dir);
+    require('../util').audit(db, ctx.user.id, 'backup_downloaded', 'settings', null, null);
+    h.raw(ctx, 'application/zip', file, { 'Content-Disposition': `attachment; filename="MyDNAPedia-LIMS-backup-${istDate()}.zip"` });
   });
 
   router.post('/admin/settings', (ctx) => {
