@@ -68,26 +68,54 @@ if (process.env.NIGHTLY_BACKUP !== '0' && !process.argv.includes('--demo')) {
 }
 
 const app = createApp({ db, storage: storage.create() });
-const url = `http://${config.host === '0.0.0.0' ? 'localhost' : config.host}:${config.port}`;
+const urlFor = (port) => `http://${config.host === '0.0.0.0' ? 'localhost' : config.host}:${port}`;
 
 // --open starts the browser once the LIMS is ready (used by the start files).
-function openBrowser() {
+function openBrowser(url) {
   const { spawn } = require('node:child_process');
   const [cmd, args] = process.platform === 'win32' ? ['cmd', ['/c', 'start', '', url]] : process.platform === 'darwin' ? ['open', [url]] : ['xdg-open', [url]];
   try { spawn(cmd, args, { detached: true, stdio: 'ignore' }).on('error', () => {}).unref(); } catch { /* open it by hand */ }
 }
 
-const server = app.server();
-server.on('error', (e) => {
-  if (e.code === 'EADDRINUSE') {
-    console.error(`\n  Port ${config.port} is already in use. The LIMS is probably already running in another window:\n  open ${url} in your browser, or close the other window and start again.\n  To switch between the demo and your own data, close the other LIMS window first.\n`);
-  } else {
-    console.error(e);
-  }
-  process.exit(1);
-});
-server.listen(config.port, config.host, () => {
-  console.log(`  MyDNAPedia LIMS${config.live ? '' : ' (test version)'} is running at ${url}`);
-  console.log('  Keep this window open while you use it. Press Ctrl+C to stop.');
-  if (process.argv.includes('--open')) openBrowser();
-});
+// Windows can reserve port 3000 for itself (Hyper-V, WSL or Docker), and then
+// refuses it with EACCES. Unless a PORT was set on purpose, the LIMS then moves
+// to another port and remembers it in DATA_DIR/port.txt, so it keeps the same
+// address next time and a second window still finds the first one running.
+const portFile = path.join(config.dataDir, 'port.txt');
+const fixedPort = Boolean(process.env.PORT);
+const remembered = fixedPort ? null : Number((() => { try { return fs.readFileSync(portFile, 'utf8').trim(); } catch { return ''; } })()) || null;
+const SPARE_PORTS = [8080, 8088, 8800, 9090, 4300, 5080, 18080];
+const tries = fixedPort ? [config.port] : [...new Set([remembered || config.port, config.port, ...SPARE_PORTS])];
+
+function start(i) {
+  const port = tries[i];
+  const server = app.server();
+  server.once('error', (e) => {
+    const refused = e.code === 'EACCES' || (e.code === 'EADDRINUSE' && port !== remembered && port !== config.port);
+    if (refused && i + 1 < tries.length) {
+      if (e.code === 'EACCES') console.log(`  Windows does not allow port ${port} on this computer. Trying another port...`);
+      return start(i + 1);
+    }
+    const url = urlFor(port);
+    if (e.code === 'EADDRINUSE') {
+      console.error(`\n  Port ${port} is already in use. The LIMS is probably already running in another window:\n  open ${url} in your browser, or close the other window and start again.\n  To switch between the demo and your own data, close the other LIMS window first.\n`);
+    } else if (e.code === 'EACCES') {
+      console.error(`\n  This computer does not allow the LIMS to use port ${port}${fixedPort ? '' : ' or any of the spare ports'}.\n  Choose another: add the line  set PORT=8123  above the "node" line in the start file, then start again.\n`);
+    } else {
+      console.error(e);
+    }
+    process.exit(1);
+  });
+  server.listen(port, config.host, () => {
+    const url = urlFor(port);
+    config.port = port;
+    if (!process.env.PUBLIC_URL) config.publicUrl = `http://localhost:${port}`;
+    if (!fixedPort) {
+      try { if (port === 3000) fs.rmSync(portFile, { force: true }); else fs.writeFileSync(portFile, String(port)); } catch { /* not important */ }
+    }
+    console.log(`  MyDNAPedia LIMS${config.live ? '' : ' (test version)'} is running at ${url}`);
+    console.log('  Keep this window open while you use it. Press Ctrl+C to stop.');
+    if (process.argv.includes('--open')) openBrowser(url);
+  });
+}
+start(0);
