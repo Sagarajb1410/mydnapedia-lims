@@ -33,7 +33,7 @@ If IIS (the Windows web server) is installed and using ports 80 and 443, stop it
 ## 3. Run the setup (10 minutes)
 
 1. Connect to the server with Remote Desktop.
-2. Copy the LIMS zip (for example `MyDNAPedia-LIMS-v1.35.zip`) onto the server, right-click it and choose **Extract All**.
+2. Copy the LIMS zip (for example `MyDNAPedia-LIMS-v1.36.zip`) onto the server, right-click it and choose **Extract All**.
 3. Open the extracted folder, then `deploy`, then `windows`.
 4. Right-click **SETUP-WINDOWS-SERVER.bat** and choose **Run as administrator**.
 5. It asks three questions:
@@ -69,7 +69,7 @@ If you gave a demo address, a second, completely separate LIMS runs there with d
 
 ## Past samples
 
-To bring in samples the lab processed before the LIMS: **Samples, Past samples** (or **Upload from Excel**). Download the template and fill one row per sample with the three "Old sample" dates: registered on, received at lab on, and completed (report given) on. Samples with a completed date come in closed. Nothing is sent to patients or partners. Up to 2000 rows per file, and you can do this any time.
+To bring in samples the lab processed before the LIMS: **Samples, Past samples**. Download its short template and fill one row per sample: name, gender, age, test, and the dates it was registered and (if the report was given) completed. An empty Payment means it was already paid. Samples with a completed date come in closed. Nothing is sent to patients or partners. Up to 2000 rows per file, and you can do this any time.
 
 ## Backups
 
