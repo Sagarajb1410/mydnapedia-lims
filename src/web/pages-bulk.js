@@ -18,6 +18,28 @@ module.exports = function routes(router, { db }, h) {
 <p class="sub">Registering for <b>${account ? account.name : ''}</b>.${bal != null ? html` Credit balance: <b class="${bal < 0 ? 'neg' : ''}">${rupees(bal)}</b>. Each test price is deducted when you confirm.` : ''}</p></div></div>`;
   };
 
+  const staff = (u) => ['admin', 'lab'].includes(u.role);
+
+  // Past samples: their own short template and page, any time.
+  router.get('/samples/past', (ctx) => {
+    if (!staff(ctx.user)) throw new UserError('Only MyDNAPedia staff can enter past samples.');
+    h.send(ctx, 'Past samples', html`<a class="crumb" href="/samples">${icon('back')}Samples</a>
+<div class="head"><div><h1>Past samples</h1>
+<p class="sub">Bring in samples the lab handled before the LIMS, with their real dates. Nothing is sent to patients or partners.</p></div></div>
+<div class="card" style="max-width:720px">
+<ol style="margin:0;padding-left:20px;display:grid;gap:14px">
+<li><b>Download the past samples template.</b> It has only the columns an old record needs.<br>
+<a class="btn light" href="/samples/bulk/template?past=1" style="margin-top:8px">${icon('download')}Download the template</a></li>
+<li><b>Fill one row per sample:</b> name, gender, age, test, and the date it was <b>registered</b>. If the report was already given, add the date it was <b>completed</b>: the sample is then closed.</li>
+<li><b>Upload it.</b> Every row is checked first. Nothing is saved until you confirm.</li>
+</ol>
+<form method="post" action="/samples/bulk" enctype="multipart/form-data" style="margin-top:14px;border-top:1px solid var(--line);padding-top:16px">
+<label for="file">Filled Excel file (.xlsx) or CSV</label>
+<input id="file" type="file" name="file" accept=".xlsx,.csv" required>
+<div class="actions"><button>${icon('upload')}Upload and check</button></div></form></div>
+<p class="muted" style="max-width:720px">Up to ${bulk.MAX_ROWS} rows per file. Use it as often as you need. For a single past sample, use <a href="/samples/new">Register a sample</a> and open "Old sample?".</p>`);
+  });
+
   router.get('/samples/bulk', (ctx) => {
     allowed(ctx.user);
     h.send(ctx, 'Register from Excel', html`${intro(ctx)}
@@ -31,13 +53,15 @@ module.exports = function routes(router, { db }, h) {
 <form method="post" action="/samples/bulk" enctype="multipart/form-data" style="margin-top:14px;border-top:1px solid var(--line);padding-top:16px">
 <label for="file">Filled Excel file (.xlsx) or CSV</label>
 <input id="file" type="file" name="file" accept=".xlsx,.csv" required>
-<div class="actions"><button>${icon('upload')}Upload and check</button></div></form></div>`);
+<div class="actions"><button>${icon('upload')}Upload and check</button></div></form></div>
+${staff(ctx.user) ? html`<p class="muted" style="max-width:720px">Samples handled before the LIMS? Use <a href="/samples/past">Past samples</a>.</p>` : ''}`);
   });
 
   router.get('/samples/bulk/template', (ctx) => {
     allowed(ctx.user);
-    h.raw(ctx, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', bulk.template(db, ctx.user),
-      { 'Content-Disposition': 'attachment; filename="MyDNAPedia-sample-registration-template.xlsx"' });
+    const past = Boolean(ctx.query.past) && staff(ctx.user);
+    h.raw(ctx, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', bulk.template(db, ctx.user, { past }),
+      { 'Content-Disposition': `attachment; filename="MyDNAPedia-${past ? 'past-samples' : 'sample-registration'}-template.xlsx"` });
   });
 
   router.post('/samples/bulk', (ctx) => {
@@ -67,7 +91,7 @@ ${rows.map((r) => html`<tr><td>${r.line}</td><td>${r.label.name || '—'}</td><t
     const out = bulk.confirm(db, ctx.user, String(ctx.body.token || ''));
     audit(db, ctx.user.id, 'samples_bulk_registered', 'sample', null, { count: out.sampleIds.length });
     const ids = out.sampleIds.join(',');
-    h.send(ctx, 'Samples registered', html`<div class="flash ok">${icon('check')}<div>${out.sampleIds.length} ${out.sampleIds.length === 1 ? 'sample' : 'samples'} registered.${out.skipped ? ` ${out.skipped} ${out.skipped === 1 ? 'row was' : 'rows were'} left out; fix ${out.skipped === 1 ? 'it' : 'them'} and upload again.` : ''} Each patient gets the registration message with their tracking link.</div></div>
+    h.send(ctx, 'Samples registered', html`<div class="flash ok">${icon('check')}<div>${out.sampleIds.length} ${out.sampleIds.length === 1 ? 'sample' : 'samples'} registered.${out.skipped ? ` ${out.skipped} ${out.skipped === 1 ? 'row was' : 'rows were'} left out; fix ${out.skipped === 1 ? 'it' : 'them'} and upload again.` : ''}${out.past === out.sampleIds.length ? ' They keep their past dates, and no messages were sent.' : out.past ? ` ${out.past} of them are past samples: they keep their dates and get no messages. The others' patients get the registration message with their tracking link.` : ' Each patient gets the registration message with their tracking link.'}</div></div>
 <div class="head"><div><h1>Samples registered</h1><p class="sub">Print the labels and stick one on each tube.</p></div>
 <div class="actions" style="margin:0"><a class="btn" href="/samples/labels?ids=${encodeURIComponent(ids)}" target="_blank">${icon('print')}Print all labels</a><a class="btn light" href="/samples">Go to samples</a></div></div>
 <div class="card"><div class="table-wrap"><table><thead><tr><th>Sample ID</th><th>Patient</th><th>Test</th></tr></thead><tbody>
