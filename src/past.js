@@ -27,9 +27,11 @@ function dates(input) {
   }
   if (rec && rec < col) throw new UserError('The lab received it before it was collected. Please check the dates.');
   if (rec && rec < reg) throw new UserError('The lab received it before it was registered. Please check the dates.');
-  if (done && !rec) throw new UserError('A completed old sample needs the date the lab received it too.');
-  if (done && done < rec) throw new UserError('It was completed before the lab received it. Please check the dates.');
-  return { reg, col, rec, done };
+  if (done && done < reg) throw new UserError('It was completed before it was registered. Please check the dates.');
+  // A completed sample was received by the lab; without that date, the collection date stands in.
+  const received = rec || (done ? col : '');
+  if (done && done < received) throw new UserError('It was completed before the lab received it. Please check the dates.');
+  return { reg, col, rec: received, done };
 }
 
 function register(db, user, input) {
@@ -50,7 +52,7 @@ function register(db, user, input) {
       // Fully processed before the LIMS: the report was already given, so the
       // sample is closed and never shows up as waiting for anyone.
       const now = db.get('SELECT * FROM samples WHERE id = ?', s.id);
-      db.run("UPDATE samples SET status = 'CLOSED', released_at = ? WHERE id = ?", at(d.done), s.id);
+      db.run("UPDATE samples SET status = 'CLOSED', released_at = ?, tat_met = CASE WHEN tat_due_at IS NULL OR ? <= tat_due_at THEN 1 ELSE 0 END WHERE id = ?", at(d.done), at(d.done), s.id);
       db.run('INSERT INTO sample_events (sample_pk, from_status, to_status, at, user_id, note) VALUES (?, ?, ?, ?, ?, ?)',
         s.id, now.status, 'CLOSED', at(d.done), user.id, 'Old sample: processed and reported before it was entered in the LIMS');
     }

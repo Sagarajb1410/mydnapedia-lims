@@ -29,27 +29,37 @@ function columns(user) {
   ];
 }
 
-function template(db, user) {
-  const cols = columns(user);
+// The short template for past samples: only what an old record usually has.
+const PAST_KEYS = ['full_name', 'gender', 'age', 'test', 'mobile', 'city', 'partner_ref', 'registered_on', 'received_on', 'completed_on', 'payment'];
+
+function template(db, user, { past = false } = {}) {
+  const cols = past ? columns(user).filter(([k]) => PAST_KEYS.includes(k)).map(([k, l, req]) => [k, l, req || k === 'registered_on']) : columns(user);
   const tests = db.all('SELECT name, short_name FROM tests WHERE active = 1 ORDER BY name');
   return xlsx.workbook([
     { name: 'Samples', textCols: true, freezeRow: 1, widths: cols.map(([, l]) => Math.min(Math.max(l.length + 2, 14), 34)), rows: [{ cells: cols.map(([, l, req]) => (req ? `${l} *` : l)), style: 'header' }] },
     {
       name: 'How to fill', widths: [30, 70], rows: [
-        { cells: ['How to fill the Samples sheet'], style: 'title' },
-        ['One row per sample.', 'Columns marked * are required. Leave the header row as it is.'],
-        ['Age', 'Age in years. Only name, gender, age and test are required.'],
-        ['Date of birth', 'Optional. Day/month/year, for example 11/02/1990. If given, the age is worked out from it.'],
-        ['Mobile', 'Optional. 10-digit Indian mobile number. Without it the patient gets no WhatsApp messages.'],
-        ['Test', 'The test name or short name exactly as listed below.'],
-        ['Consent', 'Optional. Write "Signed form" or "Verbal".'],
-        ['Collected by', 'Fill this in only if the sample has already been collected.'],
-        ...(['admin', 'lab'].includes(user.role) ? [['Old samples', 'For samples processed before they were entered: fill "Old sample: registered on", and "received at lab on" if the lab had it. If the report was already given, also fill "completed, report given on": the sample is then closed. They are entered with those dates and no messages are sent.']] : []),
+        { cells: [past ? 'How to fill the past samples sheet' : 'How to fill the Samples sheet'], style: 'title' },
+        ...(past ? [['Past samples', 'One row per sample the lab handled before the LIMS. They go in with these dates and no messages are sent.'],
+          ['Registered on', 'Required. Day/month/year, for example 15/03/2025.'],
+          ['Received at lab on', 'Optional. For a completed sample, empty means the day it was registered.'],
+          ['Completed, report given on', 'Fill it if the report was already given: the sample is then closed. Empty leaves it waiting at its last step.'],
+          ['Payment', 'Leave empty if it was already paid. Write Pending if the money is still due.'],
+          ['Test', 'The test name or short name exactly as listed below.']] : []),
+        ...(past ? [] : [
+          ['One row per sample.', 'Columns marked * are required. Leave the header row as it is.'],
+          ['Age', 'Age in years. Only name, gender, age and test are required.'],
+          ['Date of birth', 'Optional. Day/month/year, for example 11/02/1990. If given, the age is worked out from it.'],
+          ['Mobile', 'Optional. 10-digit Indian mobile number. Without it the patient gets no WhatsApp messages.'],
+          ['Test', 'The test name or short name exactly as listed below.'],
+          ['Consent', 'Optional. Write "Signed form" or "Verbal".'],
+          ['Collected by', 'Fill this in only if the sample has already been collected.'],
+          ...(['admin', 'lab'].includes(user.role) ? [['Old samples', 'For samples processed before they were entered: fill "Old sample: registered on", and "received at lab on" if the lab had it. If the report was already given, also fill "completed, report given on": the sample is then closed. They are entered with those dates and no messages are sent.']] : []),
+        ]),
         [`Up to ${MAX_ROWS} rows`, 'You will see a check of every row before anything is registered.'],
         { cells: ['Tests'], style: 'header' },
         ...tests.map((t) => [t.name, t.short_name]),
-        { cells: ['States'], style: 'header' },
-        ...samples.STATES.map((s) => [s]),
+        ...(past ? [] : [{ cells: ['States'], style: 'header' }, ...samples.STATES.map((s) => [s])]),
       ],
     },
   ]);
@@ -135,7 +145,9 @@ function check(db, user, file) {
     if (at.payment >= 0) {
       const pay = PAYMENTS.find((p) => low(p) === low(v('payment')));
       if (v('payment') && !pay) errors.push('Payment must be Cash, UPI, Card, Bank transfer or Pending, or left empty.');
-      input.direct = { paymentMode: !pay || pay === 'Pending' ? 'pending' : pay, paymentRef: v('payment_ref'), discountPaise: 0 };
+      // A past sample with no payment written was paid before the LIMS.
+      const paidBefore = !v('payment') && at.registered_on >= 0 && v('registered_on');
+      input.direct = { paymentMode: paidBefore ? 'Paid before LIMS' : !pay || pay === 'Pending' ? 'pending' : pay, paymentRef: v('payment_ref'), discountPaise: 0 };
     }
     let duplicate = null;
     if (patient && test) {
@@ -197,7 +209,7 @@ function confirm(db, user, token) {
     }
   }));
   pending.delete(token);
-  return { sampleIds: out, skipped: p.rows.length - good.length, day: istDate() };
+  return { sampleIds: out, skipped: p.rows.length - good.length, day: istDate(), past: good.filter((r) => r.input.past_registered).length };
 }
 
 module.exports = { columns, template, check, hold, confirm, parseDob, MAX_ROWS, _pending: pending };

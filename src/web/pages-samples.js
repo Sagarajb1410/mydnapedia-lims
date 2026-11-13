@@ -147,7 +147,7 @@ ${st === 'courier' && isStaff(u) ? html`<button class="small light" name="one" v
       return '';
     };
     h.send(ctx, title, html`<div class="head"><div><h1>${title}</h1><p class="sub">${q ? html`Results for “${q}” · ` : ''}${rows.length} shown${rows.length === 200 ? ' (latest 200)' : ''}</p></div>
-${samples.canRegister(u) ? html`<div class="actions" style="margin:0"><a class="btn light" href="/samples/bulk">${icon('upload')}Upload from Excel</a>${isStaff(u) ? html`<a class="btn light" href="/samples/bulk#past">${icon('upload')}Past samples</a>` : ''}<a class="btn" href="/samples/new">${icon('plus')}Register a sample</a></div>` : ''}</div>
+${samples.canRegister(u) ? html`<div class="actions" style="margin:0"><a class="btn light" href="/samples/bulk">${icon('upload')}Upload from Excel</a>${isStaff(u) ? html`<a class="btn light" href="/samples/past">${icon('upload')}Past samples</a>` : ''}<a class="btn" href="/samples/new">${icon('plus')}Register a sample</a></div>` : ''}</div>
 <div class="chips"><a class="chip ${todo ? 'on' : ''}" href="${link({ todo: '1' })}">Waiting for me<span>${todoCount}</span></a><a class="chip ${!phase && !status && !todo ? 'on' : ''}" href="${link({})}">All<span>${all}</span></a>
 ${journey.PHASES.filter((p) => cnt(p.statuses) || phase === p).map((p) => html`<a class="chip ${phase === p && !status ? 'on' : ''}" href="${link({ phase: p.key })}">${p.label}<span>${cnt(p.statuses)}</span></a>`)}
 ${journey.EXCEPTIONS.filter((k) => byStatus[k] || status === k).map((k) => html`<a class="chip ${status === k ? 'on' : ''}" href="${link({ status: k })}">${samples.STATUSES[k]}<span>${byStatus[k] || 0}</span></a>`)}
