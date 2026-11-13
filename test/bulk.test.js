@@ -126,3 +126,22 @@ test('staff can upload old samples with their past dates', () => {
   assert.equal(s.status, 'RECEIVED_AT_LAB');
   assert.equal(s.received_at.slice(0, 10), '2026-03-03');
 });
+
+test('past samples that were already reported come in closed, from Excel', () => {
+  const { db, admin } = fresh();
+  const rows = bulk.check(db, admin, filled(db, admin, [
+    row({ full_name: 'Done Before', mobile: '9822077777', registered_on: '01/02/2026', received_on: '04/02/2026', completed_on: '28/02/2026' }),
+    row({ full_name: 'No Receipt', mobile: '9822066666', registered_on: '01/02/2026', completed_on: '28/02/2026' }),
+    row({ full_name: 'Only Done', mobile: '9822055555', completed_on: '28/02/2026' }),
+  ]));
+  assert.equal(rows[0].errors.length, 0, rows[0].errors.join(' '));
+  assert.match(rows[1].errors.join(' '), /received/);
+  assert.match(rows[2].errors.join(' '), /registered on/);
+  const [id] = bulk.confirm(db, admin, bulk.hold(admin, rows)).sampleIds;
+  const s = db.get('SELECT * FROM samples WHERE sample_id = ?', id);
+  assert.equal(s.status, 'CLOSED');
+  const ev = db.all('SELECT to_status, at FROM sample_events WHERE sample_pk = ? ORDER BY id', s.id).map((e) => `${e.to_status} ${e.at.slice(0, 10)}`);
+  assert.deepEqual(ev.map((e) => e.split(' ')[0]), ['REGISTERED', 'COLLECTED', 'RECEIVED_AT_LAB', 'CLOSED']);
+  assert.equal(ev[3].split(' ')[1], '2026-02-28');
+  assert.equal(db.get("SELECT count(*) n FROM notifications WHERE sample_pk = ? AND status = 'pending'", s.id).n, 0);
+});

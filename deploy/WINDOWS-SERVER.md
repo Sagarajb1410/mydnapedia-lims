@@ -18,6 +18,7 @@ At your domain provider, add one DNS record:
 | Type | Name | Value |
 | --- | --- | --- |
 | A | lims | the server's public IP address |
+| A | demo | the same IP address (only if you want the demo copy) |
 
 It usually works within 10 minutes. It can take up to an hour.
 
@@ -32,12 +33,13 @@ If IIS (the Windows web server) is installed and using ports 80 and 443, stop it
 ## 3. Run the setup (10 minutes)
 
 1. Connect to the server with Remote Desktop.
-2. Copy the LIMS zip (for example `MyDNAPedia-LIMS-v1.34.zip`) onto the server, right-click it and choose **Extract All**.
+2. Copy the LIMS zip (for example `MyDNAPedia-LIMS-v1.35.zip`) onto the server, right-click it and choose **Extract All**.
 3. Open the extracted folder, then `deploy`, then `windows`.
 4. Right-click **SETUP-WINDOWS-SERVER.bat** and choose **Run as administrator**.
-5. It asks two questions:
+5. It asks three questions:
    - **Web address:** `lims.mydnapedia.org`
    - **Your email:** this becomes the first admin sign-in.
+   - **Demo address:** `demo.mydnapedia.org`, or press Enter for no demo.
 6. It installs Node.js and Caddy (Caddy handles the https certificate), copies the LIMS to `C:\MyDNAPedia`, and starts it.
 7. At the end it shows the **first admin email and one-time password** in yellow. Copy them somewhere safe. They are also saved in `C:\MyDNAPedia\data\FIRST-SIGN-IN.txt`. Delete that file after you sign in.
 
@@ -50,13 +52,24 @@ The LIMS and Caddy now start on their own whenever the server restarts, includin
 3. **Admin, Tests and prices:** your real tests and prices.
 4. **Admin, Report Centre:** check that it says "Installed and linked". The Report Studio file comes in the zip.
 
+## The demo copy
+
+If you gave a demo address, a second, completely separate LIMS runs there with dummy data. Use it for training and for showing new partners how it works. Every demo account uses the password **test1234** (admin@mydnapedia.example, sunrise@demo.example for a franchise, counsellor@demo.example, and so on). Nothing done there touches the real data, and it is not backed up.
+
 ## 5. Give partners access
 
 1. **Admin, B2B partners and suppliers:** add each franchise, clinic or supplier, then their opening credit under Billing.
 2. **Admin, People:** create a sign-in for each person and link it to their partner. Each person gets a one-time password.
-3. Send each partner the address **https://lims.mydnapedia.org**, their email and their one-time password. They choose their own password at first sign-in, and see only Registration, Billing and Lab receipts.
+3. Send each person their group's sign-in link (they are also listed under **Admin, Sign-in links**), their email and their one-time password:
+   - Franchises, clinics and suppliers: **https://lims.mydnapedia.org/franchise**
+   - Counsellors: **https://lims.mydnapedia.org/counsellor**
+   - Lab staff and admins: **https://lims.mydnapedia.org/staff**
 
-Staff and counsellors get their sign-ins the same way.
+   They choose their own password at first sign-in. Partners see only Registration, Billing and Lab receipts.
+
+## Past samples
+
+To bring in samples the lab processed before the LIMS: **Samples, Past samples** (or **Upload from Excel**). Download the template and fill one row per sample with the three "Old sample" dates: registered on, received at lab on, and completed (report given) on. Samples with a completed date come in closed. Nothing is sent to patients or partners. Up to 2000 rows per file, and you can do this any time.
 
 ## Backups
 

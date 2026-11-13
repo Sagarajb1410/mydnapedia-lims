@@ -6,11 +6,14 @@
 #   3. installs Caddy, which gets and renews the https certificate on its own,
 #   4. starts both when the server boots, and restarts them if they stop,
 #   5. opens ports 80 and 443 in Windows Firewall,
-#   6. shows the first admin sign-in.
+#   6. shows the first admin sign-in,
+#   7. optionally runs a demo copy with dummy data at its own address
+#      (for example demo.mydnapedia.org), fully separate from the real data.
 # Running it again is safe: it keeps the data and only updates the program.
 param(
   [string]$Domain = '',
   [string]$AdminEmail = '',
+  [string]$DemoDomain = '',
   [string]$Root = 'C:\MyDNAPedia'
 )
 $ErrorActionPreference = 'Stop'
@@ -28,6 +31,7 @@ if (-not (Test-Path (Join-Path $Src 'src\server.js'))) { Fail 'Run this from ins
 
 $App = Join-Path $Root 'app'
 $Data = Join-Path $Root 'data'
+$DemoData = Join-Path $Root 'demo-data'
 $CaddyDir = Join-Path $Root 'caddy'
 $SettingsFile = Join-Path $Root 'settings.txt'
 
@@ -38,6 +42,8 @@ if (Test-Path $SettingsFile) {
 }
 if (-not $Domain) { $Domain = $saved['DOMAIN'] }
 if (-not $AdminEmail) { $AdminEmail = $saved['ADMIN_EMAIL'] }
+$askDemo = -not $DemoDomain -and -not $saved.ContainsKey('DEMO_DOMAIN')
+if (-not $DemoDomain) { $DemoDomain = $saved['DEMO_DOMAIN'] }
 if (-not $Domain) {
   Write-Host ''
   Write-Host '  The web address partners will use, for example  lims.mydnapedia.org' -ForegroundColor Yellow
@@ -49,6 +55,16 @@ if ($Domain -notmatch '^[a-z0-9-]+(\.[a-z0-9-]+)+$') { Fail "`"$Domain`" is not 
 if (-not $AdminEmail) { $AdminEmail = Read-Host '  Your email (the first admin sign-in)' }
 $AdminEmail = $AdminEmail.Trim()
 if ($AdminEmail -notmatch '^[^@\s]+@[^@\s]+\.[^@\s]+$') { Fail "`"$AdminEmail`" is not an email address." }
+if ($askDemo) {
+  Write-Host ''
+  Write-Host '  Optional: a demo copy with dummy data, for training and showing partners.' -ForegroundColor Yellow
+  Write-Host '  Its address needs its own DNS "A" record to this server, for example  demo.mydnapedia.org' -ForegroundColor Yellow
+  $DemoDomain = Read-Host '  Demo address (press Enter for no demo)'
+}
+if (-not $DemoDomain) { $DemoDomain = '' }
+$DemoDomain = ($DemoDomain -replace '^https?://', '' -replace '/.*$', '').Trim().ToLower()
+if ($DemoDomain -and $DemoDomain -notmatch '^[a-z0-9-]+(\.[a-z0-9-]+)+$') { Fail "`"$DemoDomain`" is not a web address like demo.mydnapedia.org" }
+if ($DemoDomain -and $DemoDomain -eq $Domain) { Fail 'The demo needs a different address from the real LIMS.' }
 
 # ---------------------------------------------------------------------------
 Step 1 'Node.js 22'
@@ -86,12 +102,12 @@ function PortFree($p) {
 $Port = 0
 if ($saved['PORT']) { $Port = [int]$saved['PORT'] }
 # An earlier install is stopped first (the task, then the programs it started).
-foreach ($t in 'MyDNAPedia LIMS', 'MyDNAPedia Caddy') {
+foreach ($t in 'MyDNAPedia LIMS', 'MyDNAPedia Demo', 'MyDNAPedia Caddy') {
   if (Get-ScheduledTask -TaskName $t -ErrorAction SilentlyContinue) { Stop-ScheduledTask -TaskName $t -ErrorAction SilentlyContinue }
 }
 Get-CimInstance Win32_Process -Filter "Name='cmd.exe' OR Name='node.exe' OR Name='caddy.exe'" | Where-Object {
-  ($_.CommandLine -like '*run-lims.cmd*') -or ($_.CommandLine -like '*run-caddy.cmd*') -or
-  ($_.CommandLine -like '*src\server.js*' -and $_.CommandLine -notlike '*--demo*' -and $_.CommandLine -notlike '*--open*') -or ($_.ExecutablePath -like "$Root\*")
+  ($_.CommandLine -like '*run-lims.cmd*') -or ($_.CommandLine -like '*run-demo.cmd*') -or ($_.CommandLine -like '*run-caddy.cmd*') -or
+  ($_.CommandLine -like '*src\server.js*' -and $_.CommandLine -notlike '*--open*') -or ($_.ExecutablePath -like "$Root\*")
 } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 Start-Sleep -Seconds 2
 if (-not $Port -or -not (PortFree $Port)) {
@@ -100,6 +116,13 @@ if (-not $Port -or -not (PortFree $Port)) {
   if (-not $Port) { Fail 'No free port found for the LIMS.' }
 }
 Write-Host "  The LIMS will listen on 127.0.0.1:$Port (only Caddy talks to it)."
+$DemoPort = 0
+if ($DemoDomain) {
+  if ($saved['DEMO_PORT'] -and [int]$saved['DEMO_PORT'] -ne $Port -and (PortFree ([int]$saved['DEMO_PORT']))) { $DemoPort = [int]$saved['DEMO_PORT'] }
+  else { foreach ($p in 8090, 8099, 8899, 9091, 4301, 5081, 18081, 28081) { if ($p -ne $Port -and (PortFree $p)) { $DemoPort = $p; break } } }
+  if (-not $DemoPort) { Fail 'No free port found for the demo.' }
+  Write-Host "  The demo will listen on 127.0.0.1:$DemoPort."
+}
 
 # ---------------------------------------------------------------------------
 Step 3 'The LIMS program'
@@ -123,6 +146,8 @@ icacls $Data /inheritance:r /grant:r 'SYSTEM:(OI)(CI)F' 'Administrators:(OI)(CI)
 DOMAIN=$Domain
 ADMIN_EMAIL=$AdminEmail
 PORT=$Port
+DEMO_DOMAIN=$DemoDomain
+DEMO_PORT=$DemoPort
 "@ | Set-Content -Encoding ASCII $SettingsFile
 
 $runLims = Join-Path $Root 'run-lims.cmd'
@@ -144,6 +169,27 @@ ping -n 6 127.0.0.1 >nul
 goto again
 "@ | Set-Content -Encoding ASCII $runLims
 
+$runDemo = Join-Path $Root 'run-demo.cmd'
+if ($DemoDomain) {
+  New-Item -ItemType Directory -Force -Path $DemoData | Out-Null
+@"
+@echo off
+rem Started by the "MyDNAPedia Demo" scheduled task: dummy data only, separate from the real LIMS.
+set HOST=127.0.0.1
+set PORT=$DemoPort
+set DATA_DIR=$DemoData
+set STORAGE=local
+set SECURE_COOKIES=1
+set NIGHTLY_BACKUP=0
+set PUBLIC_URL=https://$DemoDomain
+cd /d "$App"
+:again
+"$NodeExe" --no-warnings src\server.js --demo >> "$DemoData\demo.log" 2>&1
+ping -n 6 127.0.0.1 >nul
+goto again
+"@ | Set-Content -Encoding ASCII $runDemo
+}
+
 # ---------------------------------------------------------------------------
 Step 4 'Caddy (https certificate, fetched and renewed automatically)'
 $CaddyExe = Join-Path $CaddyDir 'caddy.exe'
@@ -152,6 +198,10 @@ if (-not (Test-Path $CaddyExe)) {
   Invoke-WebRequest 'https://caddyserver.com/api/download?os=windows&arch=amd64' -OutFile $CaddyExe
 }
 $caddyfile = (Get-Content -Raw (Join-Path $App 'deploy\Caddyfile')).Replace('{DOMAIN}', $Domain).Replace('127.0.0.1:3000', "127.0.0.1:$Port")
+if ($DemoDomain) {
+  $demoSite = (Get-Content -Raw (Join-Path $App 'deploy\Caddyfile')).Replace('{DOMAIN}', $DemoDomain).Replace('127.0.0.1:3000', "127.0.0.1:$DemoPort")
+  $caddyfile = $caddyfile.TrimEnd() + "`r`n`r`n" + $demoSite
+}
 Set-Content -Encoding ASCII (Join-Path $CaddyDir 'Caddyfile') $caddyfile
 & $CaddyExe validate --config (Join-Path $CaddyDir 'Caddyfile') --adapter caddyfile 2>&1 | Out-Null
 if ($LASTEXITCODE -ne 0) { Fail 'The Caddy settings are not valid. Send a photo of this window to Claude.' }
@@ -181,6 +231,8 @@ function AddTask($name, $cmd) {
   Start-ScheduledTask -TaskName $name
 }
 AddTask 'MyDNAPedia LIMS' $runLims
+if ($DemoDomain) { AddTask 'MyDNAPedia Demo' $runDemo }
+elseif (Get-ScheduledTask -TaskName 'MyDNAPedia Demo' -ErrorAction SilentlyContinue) { Unregister-ScheduledTask -TaskName 'MyDNAPedia Demo' -Confirm:$false }
 AddTask 'MyDNAPedia Caddy' $runCaddy
 
 # ---------------------------------------------------------------------------
@@ -207,6 +259,8 @@ Write-Host '  The LIMS is running.' -ForegroundColor Green
 $first = Join-Path $Data 'FIRST-SIGN-IN.txt'
 Write-Host ''
 Write-Host "  Open  https://$Domain  in a browser." -ForegroundColor Green
+if ($DemoDomain) { Write-Host "  Demo with dummy data:  https://$DemoDomain   (every demo account uses the password test1234)" -ForegroundColor Green }
+Write-Host "  Sign-in links to send:  https://$Domain/franchise   https://$Domain/counsellor   https://$Domain/staff"
 Write-Host '  The https certificate can take a minute or two the first time.'
 if (Test-Path $first) {
   Write-Host ''

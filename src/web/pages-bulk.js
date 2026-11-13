@@ -31,7 +31,13 @@ module.exports = function routes(router, { db }, h) {
 <form method="post" action="/samples/bulk" enctype="multipart/form-data" style="margin-top:14px;border-top:1px solid var(--line);padding-top:16px">
 <label for="file">Filled Excel file (.xlsx) or CSV</label>
 <input id="file" type="file" name="file" accept=".xlsx,.csv" required>
-<div class="actions"><button>${icon('upload')}Upload and check</button></div></form></div>`);
+<div class="actions"><button>${icon('upload')}Upload and check</button></div></form></div>
+${['admin', 'lab'].includes(ctx.user.role) ? html`<div class="card" id="past" style="max-width:720px"><h2 style="margin-top:0">Past samples, already processed</h2>
+<p>Use the same template for samples the lab handled before they were in the LIMS. Fill the three <b>Old sample</b> columns with the real dates:</p>
+<ul style="margin:0 0 8px;padding-left:20px"><li><b>registered on</b>: always needed for a past sample</li>
+<li><b>received at lab on</b>: if the lab had it</li>
+<li><b>completed, report given on</b>: if the report was already given. The sample is then closed.</li></ul>
+<p class="muted" style="margin:0">They go in with their real dates and no messages are sent to patients or partners. Past and new samples can be in the same file. You can do this any time, as often as you need.</p></div>` : ''}`);
   });
 
   router.get('/samples/bulk/template', (ctx) => {

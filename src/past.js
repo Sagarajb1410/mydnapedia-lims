@@ -1,7 +1,8 @@
 // Registering an old sample: one the lab collected, received and processed
 // before it was entered in the LIMS. It is registered, collected and received
 // in one go with the real dates, so the TAT, the monthly report and the
-// sample's timeline show when things actually happened. Patients and partners
+// sample's timeline show when things actually happened. With a completion
+// date it is closed straight away, as a sample whose report was already given. Patients and partners
 // are not messaged about events that are long over.
 const samples = require('./samples');
 const tracking = require('./tracking');
@@ -15,9 +16,10 @@ function dates(input) {
   const reg = String(input.past_registered || '').trim();
   const col = String(input.past_collected || '').trim() || reg;
   const rec = String(input.past_received || '').trim();
+  const done = String(input.past_completed || '').trim();
   const today = istDate();
   if (!DAY.test(reg)) throw new UserError('Enter the date the old sample was registered.');
-  for (const [label, d] of [['registered', reg], ['collected', col], ['received at the lab', rec]]) {
+  for (const [label, d] of [['registered', reg], ['collected', col], ['received at the lab', rec], ['completed', done]]) {
     if (!d) continue;
     if (!DAY.test(d)) throw new UserError(`Check the date it was ${label}.`);
     if (d > today) throw new UserError(`The date it was ${label} is in the future.`);
@@ -25,7 +27,9 @@ function dates(input) {
   }
   if (rec && rec < col) throw new UserError('The lab received it before it was collected. Please check the dates.');
   if (rec && rec < reg) throw new UserError('The lab received it before it was registered. Please check the dates.');
-  return { reg, col, rec };
+  if (done && !rec) throw new UserError('A completed old sample needs the date the lab received it too.');
+  if (done && done < rec) throw new UserError('It was completed before the lab received it. Please check the dates.');
+  return { reg, col, rec, done };
 }
 
 function register(db, user, input) {
@@ -41,6 +45,14 @@ function register(db, user, input) {
       tracking.receive(db, user, s.sample_id, { condition: 'Acceptable', note: 'Old sample entered later', receivedAt: at(d.rec) });
       // No overdue alert to staff for a TAT that ran out before it was entered.
       db.run("UPDATE samples SET tat_warned = 'red' WHERE id = ?", s.id);
+    }
+    if (d.done) {
+      // Fully processed before the LIMS: the report was already given, so the
+      // sample is closed and never shows up as waiting for anyone.
+      const now = db.get('SELECT * FROM samples WHERE id = ?', s.id);
+      db.run("UPDATE samples SET status = 'CLOSED', released_at = ? WHERE id = ?", at(d.done), s.id);
+      db.run('INSERT INTO sample_events (sample_pk, from_status, to_status, at, user_id, note) VALUES (?, ?, ?, ?, ?, ?)',
+        s.id, now.status, 'CLOSED', at(d.done), user.id, 'Old sample: processed and reported before it was entered in the LIMS');
     }
     db.run('UPDATE bills SET created_at = ? WHERE sample_pk = ?', at(d.reg), s.id);
     db.run('UPDATE supplier_bills SET created_at = ? WHERE sample_pk = ?', at(d.reg), s.id);
