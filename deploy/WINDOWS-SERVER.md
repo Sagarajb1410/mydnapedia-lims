@@ -33,7 +33,7 @@ If IIS (the Windows web server) is installed and using ports 80 and 443, stop it
 ## 3. Run the setup (10 minutes)
 
 1. Connect to the server with Remote Desktop.
-2. Copy the LIMS zip (for example `MyDNAPedia-LIMS-v1.37.zip`) onto the server, right-click it and choose **Extract All**.
+2. Copy the LIMS zip (for example `MyDNAPedia-LIMS-v1.38.zip`) onto the server, right-click it and choose **Extract All**.
 3. Open the extracted folder, then `deploy`, then `windows`.
 4. Right-click **SETUP-WINDOWS-SERVER.bat** and choose **Run as administrator**.
 5. It asks three questions:

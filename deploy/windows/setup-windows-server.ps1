@@ -116,7 +116,7 @@ Write-Host "  Node.js $(& node -p 'process.versions.node') at $NodeExe"
 Step 2 'A free port for the LIMS'
 # Windows can reserve ports (Hyper-V, WSL, Docker). Pick one it allows and nothing uses.
 function PortFree($p) {
-  $reserved = netsh int ipv4 show excludedportrange protocol=tcp 2>$null | ForEach-Object {
+  $reserved = cmd /c "netsh int ipv4 show excludedportrange protocol=tcp 2>nul" | ForEach-Object {
     if ($_ -match '^\s*(\d+)\s+(\d+)') { @{ a = [int]$Matches[1]; b = [int]$Matches[2] } }
   }
   foreach ($r in $reserved) { if ($p -ge $r.a -and $p -le $r.b) { return $false } }
@@ -237,8 +237,13 @@ if ($DemoDomain) {
 }
 }
 Set-Content -Encoding ASCII (Join-Path $CaddyDir 'Caddyfile') $caddyfile
-& $CaddyExe validate --config (Join-Path $CaddyDir 'Caddyfile') --adapter caddyfile 2>&1 | Out-Null
-if ($LASTEXITCODE -ne 0) { Fail 'The Caddy settings are not valid. Send a photo of this window to Claude.' }
+# Caddy writes its normal messages to the error stream, which Windows PowerShell
+# treats as a failure while errors stop the script. Only its exit code counts.
+$ErrorActionPreference = 'Continue'
+$check = & $CaddyExe validate --config (Join-Path $CaddyDir 'Caddyfile') --adapter caddyfile 2>&1 | ForEach-Object { "$_" }
+$checkCode = $LASTEXITCODE
+$ErrorActionPreference = 'Stop'
+if ($checkCode -ne 0) { $check | Select-Object -Last 5 | ForEach-Object { Write-Host "  $_" }; Fail 'The Caddy settings are not valid. Send a photo of this window to Claude.' }
 
 $runCaddy = Join-Path $Root 'run-caddy.cmd'
 @"
