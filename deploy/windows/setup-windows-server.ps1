@@ -40,30 +40,54 @@ $saved = @{}
 if (Test-Path $SettingsFile) {
   foreach ($line in Get-Content $SettingsFile) { if ($line -match '^([A-Z_]+)=(.*)$') { $saved[$Matches[1]] = $Matches[2] } }
 }
-if (-not $Domain) { $Domain = $saved['DOMAIN'] }
+if (-not $Domain -and $saved['DOMAIN']) {
+  # The address can be changed here (for example to a new IP); Enter keeps it.
+  Write-Host ''
+  $typed = Read-Host "  Address people use: $($saved['DOMAIN'])   (press Enter to keep it, or type a new one)"
+  $Domain = if ($typed.Trim()) { $typed } else { $saved['DOMAIN'] }
+}
 if (-not $AdminEmail) { $AdminEmail = $saved['ADMIN_EMAIL'] }
 $askDemo = -not $DemoDomain -and -not $saved.ContainsKey('DEMO_DOMAIN')
 if (-not $DemoDomain) { $DemoDomain = $saved['DEMO_DOMAIN'] }
+# Changing between a web address and an IP asks about the demo again.
+$wasIp = ($saved['DOMAIN'] -match '^\d{1,3}(\.\d{1,3}){3}$')
+if ($saved['DOMAIN'] -and $Domain -and $wasIp -ne (($Domain -replace '^https?://', '' -replace '/.*$', '').Trim() -match '^\d{1,3}(\.\d{1,3}){3}$')) {
+  $DemoDomain = ''; $askDemo = $true
+}
 if (-not $Domain) {
   Write-Host ''
-  Write-Host '  The web address partners will use, for example  lims.mydnapedia.org' -ForegroundColor Yellow
-  Write-Host '  Its DNS "A" record must already point to this server''s public IP address.' -ForegroundColor Yellow
-  $Domain = Read-Host '  Web address'
+  Write-Host '  The address people will use:' -ForegroundColor Yellow
+  Write-Host '   - a web address such as  lims.mydnapedia.org  (secure https, reachable from anywhere;' -ForegroundColor Yellow
+  Write-Host '     its DNS "A" record must already point to this server''s public IP address), or' -ForegroundColor Yellow
+  Write-Host '   - this server''s office network IP such as  10.20.30.2  (plain http, only computers on' -ForegroundColor Yellow
+  Write-Host '     that network or its VPN can reach it).' -ForegroundColor Yellow
+  $Domain = Read-Host '  Address'
 }
 $Domain = ($Domain -replace '^https?://', '' -replace '/.*$', '').Trim().ToLower()
-if ($Domain -notmatch '^[a-z0-9-]+(\.[a-z0-9-]+)+$') { Fail "`"$Domain`" is not a web address like lims.mydnapedia.org" }
+# An IP address means office network mode: plain http on port 80, no certificate.
+$IpMode = $Domain -match '^\d{1,3}(\.\d{1,3}){3}$'
+if ($IpMode) {
+  foreach ($part in $Domain.Split('.')) { if ([int]$part -gt 255) { Fail "`"$Domain`" is not an IP address." } }
+} elseif ($Domain -notmatch '^[a-z0-9-]+(\.[a-z0-9-]+)+$') { Fail "`"$Domain`" is not a web address like lims.mydnapedia.org or an IP like 10.20.30.2" }
+$Scheme = if ($IpMode) { 'http' } else { 'https' }
 if (-not $AdminEmail) { $AdminEmail = Read-Host '  Your email (the first admin sign-in)' }
 $AdminEmail = $AdminEmail.Trim()
 if ($AdminEmail -notmatch '^[^@\s]+@[^@\s]+\.[^@\s]+$') { Fail "`"$AdminEmail`" is not an email address." }
 if ($askDemo) {
   Write-Host ''
   Write-Host '  Optional: a demo copy with dummy data, for training and showing partners.' -ForegroundColor Yellow
-  Write-Host '  Its address needs its own DNS "A" record to this server, for example  demo.mydnapedia.org' -ForegroundColor Yellow
-  $DemoDomain = Read-Host '  Demo address (press Enter for no demo)'
+  if ($IpMode) {
+    $yes = Read-Host "  Add a demo copy at http://${Domain}:8081 ? (y/N)"
+    $DemoDomain = if ($yes -match '^\s*y') { "${Domain}:8081" } else { '' }
+  } else {
+    Write-Host '  Its address needs its own DNS "A" record to this server, for example  demo.mydnapedia.org' -ForegroundColor Yellow
+    $DemoDomain = Read-Host '  Demo address (press Enter for no demo)'
+  }
 }
 if (-not $DemoDomain) { $DemoDomain = '' }
 $DemoDomain = ($DemoDomain -replace '^https?://', '' -replace '/.*$', '').Trim().ToLower()
-if ($DemoDomain -and $DemoDomain -notmatch '^[a-z0-9-]+(\.[a-z0-9-]+)+$') { Fail "`"$DemoDomain`" is not a web address like demo.mydnapedia.org" }
+if ($IpMode -and $DemoDomain) { $DemoDomain = "${Domain}:8081" }
+if (-not $IpMode -and $DemoDomain -and $DemoDomain -notmatch '^[a-z0-9-]+(\.[a-z0-9-]+)+$') { Fail "`"$DemoDomain`" is not a web address like demo.mydnapedia.org" }
 if ($DemoDomain -and $DemoDomain -eq $Domain) { Fail 'The demo needs a different address from the real LIMS.' }
 
 # ---------------------------------------------------------------------------
@@ -160,7 +184,8 @@ set PORT=$Port
 set DATA_DIR=$Data
 set STORAGE=local
 set FIRST_ADMIN_EMAIL=$AdminEmail
-set PUBLIC_URL=https://$Domain
+set PUBLIC_URL=${Scheme}://$Domain
+set SECURE_COOKIES=$(if ($IpMode) { '0' } else { '1' })
 cd /d "$App"
 rem If the LIMS ever stops, it is started again after 5 seconds.
 :again
@@ -179,9 +204,9 @@ set HOST=127.0.0.1
 set PORT=$DemoPort
 set DATA_DIR=$DemoData
 set STORAGE=local
-set SECURE_COOKIES=1
+set SECURE_COOKIES=$(if ($IpMode) { '0' } else { '1' })
 set NIGHTLY_BACKUP=0
-set PUBLIC_URL=https://$DemoDomain
+set PUBLIC_URL=${Scheme}://$DemoDomain
 cd /d "$App"
 :again
 "$NodeExe" --no-warnings src\server.js --demo >> "$DemoData\demo.log" 2>&1
@@ -191,16 +216,25 @@ goto again
 }
 
 # ---------------------------------------------------------------------------
-Step 4 'Caddy (https certificate, fetched and renewed automatically)'
+Step 4 $(if ($IpMode) { 'Caddy (passes the office network address to the LIMS)' } else { 'Caddy (https certificate, fetched and renewed automatically)' })
 $CaddyExe = Join-Path $CaddyDir 'caddy.exe'
 if (-not (Test-Path $CaddyExe)) {
   Write-Host '  Downloading Caddy...'
   Invoke-WebRequest 'https://caddyserver.com/api/download?os=windows&arch=amd64' -OutFile $CaddyExe
 }
+function IpSite($addr, $p) {
+  # Office network: plain http, so no https-only header and no certificate.
+  "http://$addr {`r`n`tencode gzip`r`n`trequest_body {`r`n`t`tmax_size 60MB`r`n`t}`r`n`theader {`r`n`t`tX-Frame-Options `"SAMEORIGIN`"`r`n`t`tReferrer-Policy `"same-origin`"`r`n`t}`r`n`treverse_proxy 127.0.0.1:$p`r`n}`r`n"
+}
+if ($IpMode) {
+  $caddyfile = IpSite $Domain $Port
+  if ($DemoDomain) { $caddyfile = $caddyfile + "`r`n" + (IpSite $DemoDomain $DemoPort) }
+} else {
 $caddyfile = (Get-Content -Raw (Join-Path $App 'deploy\Caddyfile')).Replace('{DOMAIN}', $Domain).Replace('127.0.0.1:3000', "127.0.0.1:$Port")
 if ($DemoDomain) {
   $demoSite = (Get-Content -Raw (Join-Path $App 'deploy\Caddyfile')).Replace('{DOMAIN}', $DemoDomain).Replace('127.0.0.1:3000', "127.0.0.1:$DemoPort")
   $caddyfile = $caddyfile.TrimEnd() + "`r`n`r`n" + $demoSite
+}
 }
 Set-Content -Encoding ASCII (Join-Path $CaddyDir 'Caddyfile') $caddyfile
 & $CaddyExe validate --config (Join-Path $CaddyDir 'Caddyfile') --adapter caddyfile 2>&1 | Out-Null
@@ -236,14 +270,16 @@ elseif (Get-ScheduledTask -TaskName 'MyDNAPedia Demo' -ErrorAction SilentlyConti
 AddTask 'MyDNAPedia Caddy' $runCaddy
 
 # ---------------------------------------------------------------------------
-Step 6 'Windows Firewall: allow web traffic (ports 80 and 443)'
-foreach ($p in 80, 443) {
+$webPorts = if ($IpMode) { @(80) + $(if ($DemoDomain) { @(8081) } else { @() }) } else { @(80, 443) }
+Step 6 "Windows Firewall: allow web traffic (ports $($webPorts -join ' and '))"
+foreach ($p in $webPorts) {
   $name = "MyDNAPedia LIMS https $p"
   if (-not (Get-NetFirewallRule -DisplayName $name -ErrorAction SilentlyContinue)) {
     New-NetFirewallRule -DisplayName $name -Direction Inbound -Protocol TCP -LocalPort $p -Action Allow | Out-Null
   }
 }
-Write-Host '  Done. If your server provider has its own firewall (for example an Azure or AWS "security group"), open ports 80 and 443 there too.'
+if (-not $IpMode) { Write-Host '  Done. If your server provider has its own firewall (for example an Azure or AWS "security group"), open ports 80 and 443 there too.' }
+else { Write-Host '  Done.' }
 
 # ---------------------------------------------------------------------------
 Step 7 'Checking'
@@ -258,10 +294,11 @@ Write-Host '  The LIMS is running.' -ForegroundColor Green
 
 $first = Join-Path $Data 'FIRST-SIGN-IN.txt'
 Write-Host ''
-Write-Host "  Open  https://$Domain  in a browser." -ForegroundColor Green
-if ($DemoDomain) { Write-Host "  Demo with dummy data:  https://$DemoDomain   (every demo account uses the password test1234)" -ForegroundColor Green }
-Write-Host "  Sign-in links to send:  https://$Domain/franchise   https://$Domain/counsellor   https://$Domain/staff"
-Write-Host '  The https certificate can take a minute or two the first time.'
+Write-Host "  Open  ${Scheme}://$Domain  in a browser." -ForegroundColor Green
+if ($DemoDomain) { Write-Host "  Demo with dummy data:  ${Scheme}://$DemoDomain   (every demo account uses the password test1234)" -ForegroundColor Green }
+Write-Host "  Sign-in links to send:  ${Scheme}://$Domain/franchise   ${Scheme}://$Domain/counsellor   ${Scheme}://$Domain/staff"
+if ($IpMode) { Write-Host '  Only computers on this office network (or its VPN) can open it.' }
+else { Write-Host '  The https certificate can take a minute or two the first time.' }
 if (Test-Path $first) {
   Write-Host ''
   Get-Content $first | ForEach-Object { Write-Host "  $_" -ForegroundColor Yellow }

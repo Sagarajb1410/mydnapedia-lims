@@ -33,17 +33,32 @@ If IIS (the Windows web server) is installed and using ports 80 and 443, stop it
 ## 3. Run the setup (10 minutes)
 
 1. Connect to the server with Remote Desktop.
-2. Copy the LIMS zip (for example `MyDNAPedia-LIMS-v1.36.zip`) onto the server, right-click it and choose **Extract All**.
+2. Copy the LIMS zip (for example `MyDNAPedia-LIMS-v1.37.zip`) onto the server, right-click it and choose **Extract All**.
 3. Open the extracted folder, then `deploy`, then `windows`.
 4. Right-click **SETUP-WINDOWS-SERVER.bat** and choose **Run as administrator**.
 5. It asks three questions:
-   - **Web address:** `lims.mydnapedia.org`
+   - **Address:** `lims.mydnapedia.org` (or an office IP, see below)
    - **Your email:** this becomes the first admin sign-in.
    - **Demo address:** `demo.mydnapedia.org`, or press Enter for no demo.
 6. It installs Node.js and Caddy (Caddy handles the https certificate), copies the LIMS to `C:\MyDNAPedia`, and starts it.
 7. At the end it shows the **first admin email and one-time password** in yellow. Copy them somewhere safe. They are also saved in `C:\MyDNAPedia\data\FIRST-SIGN-IN.txt`. Delete that file after you sign in.
 
 The LIMS and Caddy now start on their own whenever the server restarts, including after Windows Updates. Nobody needs to be signed in to the server.
+
+## Office network address instead (for example 10.20.30.2)
+
+If people only use the LIMS inside your office network or over its VPN, you can skip steps 1 and 2. At the setup's **Address** question, type the server's office IP, such as `10.20.30.2`. The LIMS then opens at **http://10.20.30.2**, with links such as http://10.20.30.2/franchise. If you want the demo copy, answer `y` and it opens at http://10.20.30.2:8081.
+
+Keep in mind:
+
+- Only computers on that network, or connected to it by VPN, can open it. Partners elsewhere cannot.
+- It uses plain http, so passwords and client data are not encrypted on the network. Use it only on a network you trust. You can move to a web address with https later without losing data.
+
+## Changing the address or IP later
+
+Run `SETUP-WINDOWS-SERVER.bat` again as administrator. Its first question shows the current address. Press Enter to keep it, or type the new one (a web address or an IP). Your data is kept.
+
+If the server's public IP changes and you use a web address, you don't need to run the setup again. Only change the DNS "A" record to the new IP.
 
 ## 4. First sign-in and setup
 
