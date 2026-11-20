@@ -50,8 +50,8 @@ if (-not $AdminEmail) { $AdminEmail = $saved['ADMIN_EMAIL'] }
 $askDemo = -not $DemoDomain -and -not $saved.ContainsKey('DEMO_DOMAIN')
 if (-not $DemoDomain) { $DemoDomain = $saved['DEMO_DOMAIN'] }
 # Changing between a web address and an IP asks about the demo again.
-$wasIp = ($saved['DOMAIN'] -match '^\d{1,3}(\.\d{1,3}){3}$')
-if ($saved['DOMAIN'] -and $Domain -and $wasIp -ne (($Domain -replace '^https?://', '' -replace '/.*$', '').Trim() -match '^\d{1,3}(\.\d{1,3}){3}$')) {
+$wasIp = ($saved['DOMAIN'] -match '^\d{1,3}(\.\d{1,3}){3}(:\d{1,5})?$')
+if ($saved['DOMAIN'] -and $Domain -and $wasIp -ne (($Domain -replace '^https?://', '' -replace '/.*$', '').Trim() -match '^\d{1,3}(\.\d{1,3}){3}(:\d{1,5})?$')) {
   $DemoDomain = ''; $askDemo = $true
 }
 if (-not $Domain) {
@@ -59,15 +59,21 @@ if (-not $Domain) {
   Write-Host '  The address people will use:' -ForegroundColor Yellow
   Write-Host '   - a web address such as  lims.mydnapedia.org  (secure https, reachable from anywhere;' -ForegroundColor Yellow
   Write-Host '     its DNS "A" record must already point to this server''s public IP address), or' -ForegroundColor Yellow
-  Write-Host '   - this server''s office network IP such as  10.20.30.2  (plain http, only computers on' -ForegroundColor Yellow
-  Write-Host '     that network or its VPN can reach it).' -ForegroundColor Yellow
+  Write-Host '   - this server''s IP such as  10.20.30.2 , optionally with a port such as  10.20.30.2:5017' -ForegroundColor Yellow
+  Write-Host '     (plain http, not encrypted: meant for an office network or VPN).' -ForegroundColor Yellow
   $Domain = Read-Host '  Address'
 }
 $Domain = ($Domain -replace '^https?://', '' -replace '/.*$', '').Trim().ToLower()
-# An IP address means office network mode: plain http on port 80, no certificate.
-$IpMode = $Domain -match '^\d{1,3}(\.\d{1,3}){3}$'
+# An IP address (with an optional :port) means plain http, no certificate.
+$IpMode = $Domain -match '^\d{1,3}(\.\d{1,3}){3}(:\d{1,5})?$'
+$WebPort = 80
 if ($IpMode) {
-  foreach ($part in $Domain.Split('.')) { if ([int]$part -gt 255) { Fail "`"$Domain`" is not an IP address." } }
+  $IpHost = $Domain.Split(':')[0]
+  if ($Domain.Contains(':')) { $WebPort = [int]$Domain.Split(':')[1] }
+  foreach ($part in $IpHost.Split('.')) { if ([int]$part -gt 255) { Fail "`"$Domain`" is not an IP address." } }
+  if ($WebPort -lt 1 -or $WebPort -gt 65535) { Fail "`"$WebPort`" is not a port number." }
+  if ($WebPort -eq 80) { $Domain = $IpHost }
+  $DemoWebPort = if ($WebPort -eq 8081) { 8082 } else { 8081 }
 } elseif ($Domain -notmatch '^[a-z0-9-]+(\.[a-z0-9-]+)+$') { Fail "`"$Domain`" is not a web address like lims.mydnapedia.org or an IP like 10.20.30.2" }
 $Scheme = if ($IpMode) { 'http' } else { 'https' }
 if (-not $AdminEmail) { $AdminEmail = Read-Host '  Your email (the first admin sign-in)' }
@@ -77,8 +83,8 @@ if ($askDemo) {
   Write-Host ''
   Write-Host '  Optional: a demo copy with dummy data, for training and showing partners.' -ForegroundColor Yellow
   if ($IpMode) {
-    $yes = Read-Host "  Add a demo copy at http://${Domain}:8081 ? (y/N)"
-    $DemoDomain = if ($yes -match '^\s*y') { "${Domain}:8081" } else { '' }
+    $yes = Read-Host "  Add a demo copy at http://${IpHost}:$DemoWebPort ? (y/N)"
+    $DemoDomain = if ($yes -match '^\s*y') { "${IpHost}:$DemoWebPort" } else { '' }
   } else {
     Write-Host '  Its address needs its own DNS "A" record to this server, for example  demo.mydnapedia.org' -ForegroundColor Yellow
     $DemoDomain = Read-Host '  Demo address (press Enter for no demo)'
@@ -86,7 +92,7 @@ if ($askDemo) {
 }
 if (-not $DemoDomain) { $DemoDomain = '' }
 $DemoDomain = ($DemoDomain -replace '^https?://', '' -replace '/.*$', '').Trim().ToLower()
-if ($IpMode -and $DemoDomain) { $DemoDomain = "${Domain}:8081" }
+if ($IpMode -and $DemoDomain) { $DemoDomain = "${IpHost}:$DemoWebPort" }
 if (-not $IpMode -and $DemoDomain -and $DemoDomain -notmatch '^[a-z0-9-]+(\.[a-z0-9-]+)+$') { Fail "`"$DemoDomain`" is not a web address like demo.mydnapedia.org" }
 if ($DemoDomain -and $DemoDomain -eq $Domain) { Fail 'The demo needs a different address from the real LIMS.' }
 
@@ -134,16 +140,17 @@ Get-CimInstance Win32_Process -Filter "Name='cmd.exe' OR Name='node.exe' OR Name
   ($_.CommandLine -like '*src\server.js*' -and $_.CommandLine -notlike '*--open*') -or ($_.ExecutablePath -like "$Root\*")
 } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 Start-Sleep -Seconds 2
-if (-not $Port -or -not (PortFree $Port)) {
+$public = if ($IpMode) { @($WebPort, $DemoWebPort) } else { @(80, 443) }
+if (-not $Port -or ($public -contains $Port) -or -not (PortFree $Port)) {
   $Port = 0
-  foreach ($p in 8080, 8088, 8800, 9090, 4300, 5080, 18080, 28080) { if (PortFree $p) { $Port = $p; break } }
+  foreach ($p in 8080, 8088, 8800, 9090, 4300, 5080, 18080, 28080) { if (($public -notcontains $p) -and (PortFree $p)) { $Port = $p; break } }
   if (-not $Port) { Fail 'No free port found for the LIMS.' }
 }
 Write-Host "  The LIMS will listen on 127.0.0.1:$Port (only Caddy talks to it)."
 $DemoPort = 0
 if ($DemoDomain) {
-  if ($saved['DEMO_PORT'] -and [int]$saved['DEMO_PORT'] -ne $Port -and (PortFree ([int]$saved['DEMO_PORT']))) { $DemoPort = [int]$saved['DEMO_PORT'] }
-  else { foreach ($p in 8090, 8099, 8899, 9091, 4301, 5081, 18081, 28081) { if ($p -ne $Port -and (PortFree $p)) { $DemoPort = $p; break } } }
+  if ($saved['DEMO_PORT'] -and [int]$saved['DEMO_PORT'] -ne $Port -and ($public -notcontains [int]$saved['DEMO_PORT']) -and (PortFree ([int]$saved['DEMO_PORT']))) { $DemoPort = [int]$saved['DEMO_PORT'] }
+  else { foreach ($p in 8090, 8099, 8899, 9091, 4301, 5081, 18081, 28081) { if ($p -ne $Port -and ($public -notcontains $p) -and (PortFree $p)) { $DemoPort = $p; break } } }
   if (-not $DemoPort) { Fail 'No free port found for the demo.' }
   Write-Host "  The demo will listen on 127.0.0.1:$DemoPort."
 }
@@ -275,7 +282,7 @@ elseif (Get-ScheduledTask -TaskName 'MyDNAPedia Demo' -ErrorAction SilentlyConti
 AddTask 'MyDNAPedia Caddy' $runCaddy
 
 # ---------------------------------------------------------------------------
-$webPorts = if ($IpMode) { @(80) + $(if ($DemoDomain) { @(8081) } else { @() }) } else { @(80, 443) }
+$webPorts = if ($IpMode) { @($WebPort) + $(if ($DemoDomain) { @($DemoWebPort) } else { @() }) } else { @(80, 443) }
 Step 6 "Windows Firewall: allow web traffic (ports $($webPorts -join ' and '))"
 foreach ($p in $webPorts) {
   $name = "MyDNAPedia LIMS https $p"
@@ -284,7 +291,7 @@ foreach ($p in $webPorts) {
   }
 }
 if (-not $IpMode) { Write-Host '  Done. If your server provider has its own firewall (for example an Azure or AWS "security group"), open ports 80 and 443 there too.' }
-else { Write-Host '  Done.' }
+else { Write-Host "  Done. If your server provider has its own firewall (for example an AWS or Azure `"security group`"), allow port $($webPorts -join ' and ') there too." }
 
 # ---------------------------------------------------------------------------
 Step 7 'Checking'
@@ -302,7 +309,7 @@ Write-Host ''
 Write-Host "  Open  ${Scheme}://$Domain  in a browser." -ForegroundColor Green
 if ($DemoDomain) { Write-Host "  Demo with dummy data:  ${Scheme}://$DemoDomain   (every demo account uses the password test1234)" -ForegroundColor Green }
 Write-Host "  Sign-in links to send:  ${Scheme}://$Domain/franchise   ${Scheme}://$Domain/counsellor   ${Scheme}://$Domain/staff"
-if ($IpMode) { Write-Host '  Only computers on this office network (or its VPN) can open it.' }
+if ($IpMode) { Write-Host '  This address uses plain http: nothing is encrypted. Use it on an office network or VPN, not the open internet.' }
 else { Write-Host '  The https certificate can take a minute or two the first time.' }
 if (Test-Path $first) {
   Write-Host ''

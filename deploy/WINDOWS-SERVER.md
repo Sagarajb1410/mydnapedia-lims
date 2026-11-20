@@ -33,7 +33,7 @@ If IIS (the Windows web server) is installed and using ports 80 and 443, stop it
 ## 3. Run the setup (10 minutes)
 
 1. Connect to the server with Remote Desktop.
-2. Copy the LIMS zip (for example `MyDNAPedia-LIMS-v1.38.zip`) onto the server, right-click it and choose **Extract All**.
+2. Copy the LIMS zip (for example `MyDNAPedia-LIMS-v1.39.zip`) onto the server, right-click it and choose **Extract All**.
 3. Open the extracted folder, then `deploy`, then `windows`.
 4. Right-click **SETUP-WINDOWS-SERVER.bat** and choose **Run as administrator**.
 5. It asks three questions:
@@ -48,6 +48,8 @@ The LIMS and Caddy now start on their own whenever the server restarts, includin
 ## Office network address instead (for example 10.20.30.2)
 
 If people only use the LIMS inside your office network or over its VPN, you can skip steps 1 and 2. At the setup's **Address** question, type the server's office IP, such as `10.20.30.2`. The LIMS then opens at **http://10.20.30.2**, with links such as http://10.20.30.2/franchise. If you want the demo copy, answer `y` and it opens at http://10.20.30.2:8081.
+
+You can also give a port after the IP, such as `10.20.30.2:5017`. The LIMS then opens at **http://10.20.30.2:5017/login**. That is the same kind of address that some other lab systems use. If the server is in the cloud (AWS, Azure and so on), also allow that port in the provider's "security group" or firewall.
 
 Keep in mind:
 
