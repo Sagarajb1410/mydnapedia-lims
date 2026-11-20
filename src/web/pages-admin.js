@@ -1,5 +1,6 @@
 // Admin pages (tests, prices, accounts, users, settings, audit) and the outbox.
 const { html, raw, field, select, roleLabel, icon } = require('./views');
+const config = require('../config');
 const admin = require('../admin');
 const notify = require('../notify');
 const samples = require('../samples');
@@ -46,6 +47,8 @@ module.exports = function (router, { db, storage }, h) {
 ${tile('/admin/accounts', 'billing', 'B2B partners and suppliers', 'Accounts, GSTIN, contacts, reminder levels')}
 ${tile('/admin/users', 'register', 'People', 'Sign-ins and roles')}
 ${tile('/audit', 'reports', 'Audit trail', 'Every change, who and when')}</div>
+<h2 id="links">Sign-in links</h2><div class="card"><p style="margin-top:0">Send each group its own link. Everyone signs in with the email and one-time password you give them under People, then chooses their own password.</p>
+<table><tbody>${Object.entries(require('./app').ENTRIES).map(([k, e]) => html`<tr><td>${e.who}</td><td><a href="/${k}"><b>${config.publicUrl}/${k}</b></a></td></tr>`)}</tbody></table></div>
 <h2 id="backup">Backup</h2><div class="card"><p style="margin-top:0">Every patient, sample, bill and report is kept in the LIMS database. It also saves a copy of itself every day and keeps the last 14 days. Download a copy here to keep somewhere safe, such as a pen drive or your company Google Drive. It holds client data, so never email it or share it.</p>
 <div class="actions" style="margin-top:0"><a class="btn light" href="/admin/backup">Download backup</a></div></div>
 <h2 id="report-centre">Report Centre</h2><div class="card">${(() => {

@@ -18,7 +18,10 @@ module.exports = {
   stage: process.env.LIMS_STAGE || 'test',
   live: process.env.LIMS_STAGE === 'live',
   // Behind https (the live server), sign-in cookies are sent over https only.
-  secureCookies: process.env.SECURE_COOKIES === '1' || process.env.LIMS_STAGE === 'live',
+  // SECURE_COOKIES=0 turns that off for a live LIMS reached by plain http on
+  // the office network (an address such as http://10.20.30.2).
+  secureCookies: process.env.SECURE_COOKIES === '0' ? false
+    : process.env.SECURE_COOKIES === '1' || process.env.LIMS_STAGE === 'live',
   timeZone: 'Asia/Kolkata',
   sessionHours: 12,
   // The address patients use for the tracking link in messages.

@@ -92,3 +92,23 @@ test('receipt acknowledgement opens for its partner and staff only', async () =>
     assert.notStrictEqual((await fetch(`${base}/receipts`, { headers: { cookie: counsellor }, redirect: 'manual' })).status, 200);
   });
 });
+
+test('each group has its own sign-in link, and admin lists them', async () => {
+  await withServer(async (base) => {
+    for (const [path, title] of [['/franchise', 'Franchise and partner sign-in'], ['/counsellor', 'Counsellor sign-in'], ['/staff', 'Lab and admin sign-in']]) {
+      const res = await fetch(base + path, { redirect: 'manual' });
+      assert.strictEqual(res.status, 200, path);
+      const body = await res.text();
+      assert.ok(body.includes(title), path);
+      assert.ok(body.includes(`name="entry" value="${path.slice(1)}"`), path);
+    }
+    const bad = await fetch(`${base}/login`, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'email=sunrise%40demo.example&password=wrong&entry=franchise' });
+    assert.ok((await bad.text()).includes('Franchise and partner sign-in'), 'a wrong password keeps the same page');
+    const cookie = await signIn(base, 'sunrise@demo.example');
+    assert.strictEqual((await fetch(`${base}/franchise`, { headers: { cookie }, redirect: 'manual' })).status, 303, 'already signed in goes to the start page');
+    const admin = await signIn(base, 'admin@mydnapedia.example');
+    const page = await (await fetch(`${base}/admin`, { headers: { cookie: admin } })).text();
+    assert.match(page, /\/franchise<\/b>/);
+    assert.match(page, /\/counsellor<\/b>/);
+  });
+});

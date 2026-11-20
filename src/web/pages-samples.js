@@ -147,7 +147,7 @@ ${st === 'courier' && isStaff(u) ? html`<button class="small light" name="one" v
       return '';
     };
     h.send(ctx, title, html`<div class="head"><div><h1>${title}</h1><p class="sub">${q ? html`Results for “${q}” · ` : ''}${rows.length} shown${rows.length === 200 ? ' (latest 200)' : ''}</p></div>
-${samples.canRegister(u) ? html`<div class="actions" style="margin:0"><a class="btn light" href="/samples/bulk">${icon('upload')}Upload from Excel</a><a class="btn" href="/samples/new">${icon('plus')}Register a sample</a></div>` : ''}</div>
+${samples.canRegister(u) ? html`<div class="actions" style="margin:0"><a class="btn light" href="/samples/bulk">${icon('upload')}Upload from Excel</a>${isStaff(u) ? html`<a class="btn light" href="/samples/past">${icon('upload')}Past samples</a>` : ''}<a class="btn" href="/samples/new">${icon('plus')}Register a sample</a></div>` : ''}</div>
 <div class="chips"><a class="chip ${todo ? 'on' : ''}" href="${link({ todo: '1' })}">Waiting for me<span>${todoCount}</span></a><a class="chip ${!phase && !status && !todo ? 'on' : ''}" href="${link({})}">All<span>${all}</span></a>
 ${journey.PHASES.filter((p) => cnt(p.statuses) || phase === p).map((p) => html`<a class="chip ${phase === p && !status ? 'on' : ''}" href="${link({ phase: p.key })}">${p.label}<span>${cnt(p.statuses)}</span></a>`)}
 ${journey.EXCEPTIONS.filter((k) => byStatus[k] || status === k).map((k) => html`<a class="chip ${status === k ? 'on' : ''}" href="${link({ status: k })}">${samples.STATUSES[k]}<span>${byStatus[k] || 0}</span></a>`)}
@@ -242,8 +242,9 @@ ${isStaff(u) ? html`<details class="card" ${v('past_registered') ? raw('open') :
 <p class="muted">Give the real dates. The sample goes straight to "Received at lab" with those dates, the TAT counts from the receipt date, and no messages go to the patient or partner. Put your old sample number in "Your reference number" if it had one. Leave the Collection section below empty.</p>
 <div class="grid">${field('Registered on', 'past_registered', v('past_registered'), { type: 'date', attrs: `max="${istDate()}"` })}
 ${field('Collected on', 'past_collected', v('past_collected'), { type: 'date', opt: true, attrs: `max="${istDate()}"` })}
-${field('Received at the lab on', 'past_received', v('past_received'), { type: 'date', opt: true, attrs: `max="${istDate()}"` })}</div>
-<p class="muted" style="margin-bottom:0">Collected on empty means the same day as registered. Received empty leaves it at "Collected".</p></details>` : ''}
+${field('Received at the lab on', 'past_received', v('past_received'), { type: 'date', opt: true, attrs: `max="${istDate()}"` })}
+${field('Completed, report given on', 'past_completed', v('past_completed'), { type: 'date', opt: true, attrs: `max="${istDate()}"` })}</div>
+<p class="muted" style="margin-bottom:0">Collected on empty means the same day as registered. Received empty leaves it at "Collected". Fill "Completed" when the report was already given: the sample is then closed.</p></details>` : ''}
 <div class="card"><h2 style="margin-top:0">Collection</h2>
 <label class="check"><input type="checkbox" name="collected_now" value="yes" ${v('collected_now') === 'yes' ? raw('checked') : ''}> The sample is already collected (now or earlier).</label>
 <div class="grid">${field('Collected by', 'collector', v('collector'), { opt: true })}${field('Collection date and time', 'collected_at', v('collected_at'), { type: 'datetime-local', opt: true, attrs: `max="${maxLocal()}"` })}</div>

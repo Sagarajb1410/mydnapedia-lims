@@ -10,6 +10,13 @@ const { UserError } = require('../util');
 const COOKIE = 'lims_session';
 const config = require('../config');
 const SECURE = config.secureCookies ? '; Secure' : '';
+// Sign-in links to send to each group of users. Any sign-in works on any of
+// them; the page only greets the group it was sent to.
+const ENTRIES = {
+  franchise: { title: 'Franchise and partner sign-in', sub: 'Register samples, follow them, and see your bills and lab receipts.', who: 'Franchises, clinics and suppliers' },
+  counsellor: { title: 'Counsellor sign-in', sub: 'Your clients, counselling sessions and action plans.', who: 'Genetic counsellors' },
+  staff: { title: 'Lab and admin sign-in', sub: 'Samples, tracking, reports, billing and admin.', who: 'Lab staff and admins' },
+};
 
 // Logo, fonts and artwork, read once at start-up.
 const STATIC_TYPES = { '.png': 'image/png', '.svg': 'image/svg+xml', '.ttf': 'font/ttf' };
@@ -49,6 +56,10 @@ function createApp({ db, storage }) {
     ctx.res.end(f.body);
   });
   router.get('/login', (ctx) => loginPage(ctx));
+  // A sign-in link for each group of users, to send them: /franchise, /counsellor, /staff.
+  for (const [entry] of Object.entries(ENTRIES)) {
+    router.get(`/${entry}`, (ctx) => (ctx.user ? helpers.redirect(ctx, '/') : loginPage(ctx, '', entry)));
+  }
   router.post('/login', (ctx) => {
     try {
       const { token, user } = auth.login(db, ctx.body.email || '', ctx.body.password || '');
@@ -60,7 +71,7 @@ function createApp({ db, storage }) {
     } catch (e) {
       if (!(e instanceof UserError)) throw e;
       ctx.flash = { type: 'error', text: e.message };
-      loginPage(ctx, ctx.body.email);
+      loginPage(ctx, ctx.body.email, ctx.body.entry);
     }
   });
 
@@ -77,11 +88,13 @@ function createApp({ db, storage }) {
     return html`<div class="flash ok" style="margin-bottom:14px"><div><b>Your own data is open</b> (folder ${path.basename(config.dataDir)}).${pw ? html` First sign-in: <b>${first.email}</b> with the one-time password <b>${pw}</b>. You will then choose your own password.` : ''}</div></div>`;
   }
 
-  function loginPage(ctx, email = '') {
+  function loginPage(ctx, email = '', entry = '') {
     const flash = ctx.flash;
-    helpers.send(ctx, 'Sign in', html`<div class="auth"><div class="art"><div class="q"><i></i><b>Every sample, from collection to counselling, in one place.</b><span>Know your DNA · Make better choices</span></div></div>
+    const e = ENTRIES[entry] || null;
+    helpers.send(ctx, e ? e.title : 'Sign in', html`<div class="auth"><div class="art"><div class="q"><i></i><b>Every sample, from collection to counselling, in one place.</b><span>Know your DNA · Make better choices</span></div></div>
 <div class="pane"><form method="post" action="/login"><img src="/static/logo-sm.png" alt="MyDNAPedia">
-<h1>Welcome back</h1><p class="sub">Sign in to the MyDNAPedia laboratory system.</p>
+<h1>${e ? e.title : 'Welcome back'}</h1><p class="sub">${e ? e.sub : 'Sign in to the MyDNAPedia laboratory system.'}</p>
+${e ? html`<input type="hidden" name="entry" value="${entry}">` : ''}
 ${testHelp()}
 ${flash ? html`<div class="flash ${flash.type}">${icon('alert')}<div>${flash.text}</div></div>` : ''}
 <div class="grid">
@@ -125,7 +138,7 @@ ${field('New password again', 'confirm', '', { type: 'password', required: true 
   require('./pages-studio')(router, ctxBase, helpers);
   require('./pages-track')(router, ctxBase, helpers);
 
-  const PUBLIC = new Set(['/login', '/studio/api', '/track', '/track/book']);
+  const PUBLIC = new Set(['/login', '/studio/api', '/track', '/track/book', ...Object.keys(ENTRIES).map((k) => `/${k}`)]);
   const isPublic = (p) => PUBLIC.has(p) || p.startsWith('/static/');
 
   async function handle(req, res) {
@@ -171,4 +184,4 @@ ${field('New password again', 'confirm', '', { type: 'password', required: true 
   return { handle, server: () => http.createServer(handle) };
 }
 
-module.exports = { createApp };
+module.exports = { ENTRIES, createApp };
